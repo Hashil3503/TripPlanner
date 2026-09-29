@@ -4,3 +4,6 @@ Thumbs.db
 public/js/config.local.js
 config.local.json
 data/
+
+# CodeGraph 로컬 색인 (머신별 생성물)
+.codegraph/
