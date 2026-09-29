@@ -1,10 +1,8 @@
 /* transit.js - 카카오맵 대중교통 길찾기(REST) 프록시.
- * - REST 키는 서버에서만 사용하고 브라우저로 내보내지 않는다 (환경변수 KAKAO_REST_KEY > config.local.json).
+ * - REST 키는 서버에서만 사용하고 브라우저로 내보내지 않는다 (환경변수 TP_KAKAO_REST_KEY).
  * - 응답을 작은 형태로 정규화하고, SQLite(transit_cache)에 캐시한다 (성공 7일, 경로 없음 1일).
  * - 카카오 호출 횟수(캐시 미스)는 IP당 분당 60회로 제한한다. */
 'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
 const auth = require('./auth');
 
 const KAKAO_URL = 'https://dapi.kakao.com/v2/routing/publictraffic';
@@ -15,10 +13,9 @@ const TTL_NONE_MS = 24 * 60 * 60 * 1000;
 const MAX_ROUTES = 5;
 const RATE_MAX = 60;
 const RATE_WINDOW_MS = 60 * 1000;
-const KEY_RECHECK_MS = 5 * 1000; // 키가 없을 때 설정 파일을 다시 읽는 최소 간격
 
 const MSG = {
-  noKey: '대중교통 실시간 조회를 쓰려면 서버에 카카오 REST API 키를 설정해 주세요 (README 참고). 지금은 추정값을 사용해요.',
+  noKey: '대중교통 실시간 조회를 쓰려면 서버에 카카오 REST API 키(환경변수 TP_KAKAO_REST_KEY)를 설정해 주세요. 지금은 추정값을 사용해요.',
   badParams: '좌표 값이 올바르지 않아요 (sx, sy, ex, ey: 경도/위도 숫자)',
   auth: '카카오 REST API 키가 올바르지 않거나 권한이 없어요. 키와 카카오맵 사용 설정을 확인해 주세요.',
   quota: '카카오 대중교통 API 호출 한도를 초과했어요. 잠시 후 다시 시도해 주세요.',
@@ -48,17 +45,6 @@ function parseParams(q) {
   const ey = parseCoord(q.ey, 90);
   if ([sx, sy, ex, ey].some(Number.isNaN)) return null;
   return { sx: round5(sx), sy: round5(sy), ex: round5(ex), ey: round5(ey) };
-}
-
-// ---- 키 ----
-function readKeyFile(file) {
-  try {
-    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const k = j && typeof j.kakaoRestKey === 'string' ? j.kakaoRestKey.trim() : '';
-    return k;
-  } catch (e) {
-    return '';
-  }
 }
 
 // ---- 정규화 ----
@@ -149,29 +135,20 @@ class TransitError extends Error {
 }
 
 /**
- * opts: { db, env, configPath, fetchImpl, now }
+ * opts: { db, env, fetchImpl, now }
  * lookup(query, ip) -> Promise<{ status, body, cache }>  (HTTP 응답 그대로 쓸 수 있는 형태)
  */
 function createTransit(opts) {
   const db = opts.db;
   const env = opts.env || process.env;
-  const configPath = opts.configPath || path.join(__dirname, '..', 'config.local.json');
   const doFetch = opts.fetchImpl || globalThis.fetch;
   const now = opts.now || Date.now;
   const limiter = auth.createLimiter(RATE_MAX, RATE_WINDOW_MS);
   const inflight = new Map(); // cache key -> Promise<result>
 
-  let fileKey = '';
-  let fileCheckedAt = 0;
-  function getKey() {
-    const e = typeof env.KAKAO_REST_KEY === 'string' ? env.KAKAO_REST_KEY.trim() : '';
-    if (e) return e;
-    if (!fileKey && now() - fileCheckedAt > KEY_RECHECK_MS) {
-      fileKey = readKeyFile(configPath); // 서버를 재시작하지 않아도 파일을 만들면 곧 적용
-      fileCheckedAt = now();
-    }
-    return fileKey;
-  }
+  // 환경변수는 프로세스 시작 시 고정되므로 키를 바꾸면 서버를 재시작해야 한다
+  const restKey = typeof env.TP_KAKAO_REST_KEY === 'string' ? env.TP_KAKAO_REST_KEY.trim() : '';
+  const getKey = () => restKey;
 
   function cacheGet(k) {
     const row = db.getTransit(k);
@@ -243,7 +220,7 @@ function createTransit(opts) {
     return run;
   }
 
-  return { lookup, getKey, purge: () => db.purgeTransit(now() - TTL_OK_MS) };
+  return { lookup, hasKey: () => Boolean(restKey), purge: () => db.purgeTransit(now() - TTL_OK_MS) };
 }
 
 module.exports = { createTransit, normalize, parseParams, MSG };

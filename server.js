@@ -26,6 +26,19 @@ const ALLOWED_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:$
 
 const GENERIC_LOGIN_ERROR = '아이디 또는 비밀번호가 올바르지 않습니다';
 
+// 카카오 키는 환경변수로만 받는다 (저장소에 키 파일 없음).
+// - JavaScript 키: 원래 브라우저에 공개되는 키 → /config.js 로 전달
+// - REST 키: 서버 전용 비밀 → server/transit.js 가 직접 읽고 절대 브라우저로 보내지 않는다
+const KEY_RE = /^[A-Za-z0-9_-]{8,128}$/;
+const envKey = (name) => {
+  const v = String(process.env[name] || '').trim();
+  return KEY_RE.test(v) ? v : '';
+};
+const KAKAO_JS_KEY = envKey('TP_KAKAO_JS_KEY');
+// 브라우저로 나가는 설정. JS 키 외의 값을 여기에 넣지 말 것
+const CLIENT_CONFIG_JS = `window.TP_CONFIG = ${JSON.stringify({ kakaoJsKey: KAKAO_JS_KEY })};
+`;
+
 let db;
 try {
   db = open(DB_PATH);
@@ -33,7 +46,7 @@ try {
   console.error(`데이터베이스를 열 수 없어요: ${e.message}`);
   process.exit(1);
 }
-const transit = createTransit({ db }); // 카카오 REST 키: 환경변수 KAKAO_REST_KEY 또는 config.local.json
+const transit = createTransit({ db }); // 카카오 REST 키: 환경변수 TP_KAKAO_REST_KEY
 db.purgeSessions();
 transit.purge();
 setInterval(() => {
@@ -59,6 +72,17 @@ function securityHeaders() {
     // 카카오 SDK는 도메인 검증에 Referer(origin)가 필요하므로 no-referrer는 쓰지 않는다
     'Referrer-Policy': 'strict-origin-when-cross-origin',
   };
+}
+
+/** 브라우저용 설정 스크립트 (카카오 JavaScript 키만 포함). 키를 바꾸면 반영되도록 캐시 금지 */
+function sendClientConfig(req, res) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, '허용되지 않는 메서드예요');
+  res.writeHead(200, {
+    'Content-Type': 'text/javascript; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Content-Length': Buffer.byteLength(CLIENT_CONFIG_JS),
+  });
+  res.end(req.method === 'HEAD' ? undefined : CLIENT_CONFIG_JS);
 }
 
 function sendJson(res, status, obj, headers) {
@@ -306,6 +330,7 @@ const server = http.createServer(async (req, res) => {
     if (!ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) throw new HttpError(403, '허용되지 않은 호스트예요');
     const pathname = String(req.url || '').split(/[?#]/)[0];
     if (pathname === '/api' || pathname.startsWith('/api/')) await handleApi(req, res, pathname);
+    else if (pathname === '/config.js') sendClientConfig(req, res);
     else serveStatic(req, res, PUBLIC_DIR);
   } catch (e) {
     if (res.headersSent) return res.destroy();
@@ -333,6 +358,9 @@ server.on('error', (e) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`여행 플래너 서버가 실행 중이에요: http://localhost:${PORT}`);
+  // 키 값은 출력하지 않고 설정 여부만 알린다
+  console.log(`카카오 JavaScript 키(TP_KAKAO_JS_KEY): ${KAKAO_JS_KEY ? '설정됨' : '없음 - 지도를 표시할 수 없어요'}`);
+  console.log(`카카오 REST API 키(TP_KAKAO_REST_KEY): ${transit.hasKey() ? '설정됨' : '없음 - 대중교통은 추정치로 계산돼요'}`);
   console.log('종료하려면 Ctrl+C 를 누르세요.');
 });
 

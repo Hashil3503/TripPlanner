@@ -285,11 +285,8 @@
         </fieldset>
         <fieldset>
           <legend>지도 · 장소 검색 (카카오)</legend>
-          <label class="key-row">카카오 JavaScript 키
-            <input id="kakaoKeyInput" type="text" name="kakaoKey" autocomplete="off" spellcheck="false" placeholder="비워 두면 public/js/config.local.js 값 사용">
-          </label>
           <p class="hint" id="kakaoKeyStatus"></p>
-          <p class="hint">Kakao Developers의 플랫폼(Web)에 <b>http://localhost:8000</b> 도메인을 등록하고, 앱 설정에서 <b>카카오맵</b>을 활성화해야 해요. 키가 없으면 지도를 표시할 수 없고, 장소 검색은 OSM(Nominatim)을 써요. 이 키는 이 브라우저에만 저장돼요.</p>
+          <p class="hint">카카오 키는 서버를 실행하는 PC의 환경변수 <b>TP_KAKAO_JS_KEY</b>(지도·검색)와 <b>TP_KAKAO_REST_KEY</b>(대중교통)로 설정해요. start.bat을 실행하면 비어 있는 키를 입력받아 등록해 줘요. 키를 바꾼 뒤에는 서버를 다시 시작하세요.</p>
         </fieldset>
         <p class="hint set-intro">요금 기준의 기본값은 서울 2025년 교통카드/중형택시입니다. 지역이나 상황에 맞게 바꿔 보세요.</p>
         <div id="settingsFields"></div>
@@ -331,7 +328,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
-  <script src="js/config.local.js"></script><!-- 없어도 됨(404 무시): 카카오 키. js/config.local.example.js 참고 -->
+  <script src="config.js"></script><!-- 서버가 생성: 환경변수 TP_KAKAO_JS_KEY (카카오 JavaScript 키) -->
   <script src="js/fare.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/sample.js"></script>

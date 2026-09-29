@@ -54,8 +54,8 @@
     const lines = state === 'none' ? ['지도를 표시하려면 카카오 JavaScript 키가 필요해요. 그 외 기능(일정 편집, 계산, 검색)은 그대로 사용할 수 있어요.'] : [error ? `사유: ${error}` : '', '키, 도메인 등록, 카카오맵 사용 설정, 네트워크 연결을 확인해 주세요.'].filter(Boolean);
     showMessage(title, lines, [
       'Kakao Developers(developers.kakao.com)에서 앱을 만들고 JavaScript 키를 복사해요.',
-      '앱 > 플랫폼 > Web에 http://localhost:8000 을 등록하고, 앱 설정에서 카카오맵을 사용 설정해요.',
-      'public/js/config.local.js 에 window.TP_CONFIG = { kakaoJsKey: \'키\' }; 를 넣거나, 설정의 "카카오 JavaScript 키"에 입력한 뒤 새로고침해요.',
+      '앱 > 플랫폼 키 > JavaScript 키 > JavaScript SDK 도메인에 http://localhost:8000 을 등록하고, 카카오맵 사용 설정을 켜요.',
+      '서버를 실행하는 PC의 환경변수 TP_KAKAO_JS_KEY 에 키를 넣고(start.bat이 입력받아 등록해 줘요) 서버를 다시 시작해요.',
     ]);
   }
 

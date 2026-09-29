@@ -7,3 +7,6 @@ data/
 
 # CodeGraph 로컬 색인 (머신별 생성물)
 .codegraph/
+
+# 로컬 전용 문서 (핸드오프 북 등, 저장소에 올리지 않음)
+doc/

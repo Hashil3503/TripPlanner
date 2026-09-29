@@ -25,7 +25,7 @@
 - **로그인 상태**: 서버가 원본입니다. 여행을 바꾸면 약 0.8초 뒤 자동 저장되고 상단에 "저장 중… / 저장됨 / 저장 실패 - 다시 시도" 상태가 표시됩니다(실패 표시를 누르면 재시도). 여행 삭제와 설정(요금 기준, 인원) 변경도 서버에 반영됩니다. 빠른 새로고침을 위해 사용자별 `localStorage` 캐시를 두지만, 페이지를 열 때마다 서버에서 다시 불러옵니다.
 - **로그아웃**: 메모리의 계정 데이터를 지우고 게스트 데이터로 돌아갑니다. 세션은 30일 동안 유지됩니다.
 - JSON **내보내기/가져오기**는 그대로 동작하며, 로그인 상태에서 가져오면 서버에 저장됩니다.
-- 카카오 키(설정 창에 입력한 값)는 계정에 저장하지 않고 이 브라우저에만 저장합니다.
+- 카카오 키는 계정이나 브라우저에 저장하지 않고, 서버 PC의 환경변수에서만 읽습니다.
 
 ## 주요 기능
 
@@ -45,8 +45,8 @@
 | 로그인 (계정, 여행, 설정) | **`data/tripplanner.db`** (SQLite 파일, 서버가 처음 실행될 때 자동 생성). 이 파일을 복사해 두면 백업됩니다. `.gitignore`에 들어 있어 커밋되지 않습니다. |
 | 게스트 | 브라우저 `localStorage` (`tripplanner.state.v1`) |
 | 로그인 사용자 캐시 | 브라우저 `localStorage` (`tripplanner.state.v1.user.<소문자 아이디>`) — 서버 데이터가 우선, 로그아웃·세션 만료 시 삭제 |
-| 경로 조회 캐시(대중교통 포함, `tripplanner.routecache.v2`), 카카오 JavaScript 키(설정 창 입력값) | 브라우저 `localStorage` |
-| 카카오 REST API 키 | 서버의 **`config.local.json`**(`.gitignore` 대상) 또는 환경변수 `KAKAO_REST_KEY`. 브라우저로는 절대 전달되지 않습니다. |
+| 경로 조회 캐시(대중교통 포함, `tripplanner.routecache.v2`) | 브라우저 `localStorage` |
+| 카카오 키 | 서버 PC의 사용자 환경변수 `TP_KAKAO_JS_KEY`, `TP_KAKAO_REST_KEY` (저장소에 없음). REST 키는 브라우저로 절대 전달되지 않습니다. |
 | 대중교통 조회 캐시 | `data/tripplanner.db`의 `transit_cache` 테이블 (성공 7일, 경로 없음 1일) |
 
 DB 테이블: `users`(아이디, 비밀번호 해시, 설정 JSON), `sessions`(세션 토큰의 SHA-256, 만료 시각), `trips`(여행 JSON, 사용자별), `transit_cache`(카카오 대중교통 응답 캐시, 사용자와 무관). 모든 여행 쿼리는 로그인한 사용자의 `user_id`로 제한됩니다.
@@ -91,19 +91,28 @@ DB 테이블: `users`(아이디, 비밀번호 해시, 설정 JSON), `sessions`(�
 
 경로 결과는 메모리와 `localStorage`에 좌표+이동수단 기준으로 캐시합니다(대중교통은 저장 용량 상한을 넘으면 오래된 것부터 버립니다). 경로 조회가 실패하면 **직선거리 x 1.3(우회 계수)** 와 이동수단별 평균 속도로 추정하고, 해당 구간에 "추정(직선거리 기반)" 표시가 붙습니다(상단 "경로 다시 계산"으로 재시도).
 
-## 카카오 지도 키 설정
+## 카카오 키 설정 (환경변수, PC당 한 번)
 
-지도와 장소 검색에 카카오 지도 JavaScript SDK를 사용합니다. 키는 무료로 발급받을 수 있습니다.
+카카오 키 두 개를 **사용자 환경변수**로 한 번 등록하면, 이후에는 저장소를 새로 클론해도 같은 PC에서는 `start.bat`만 실행하면 됩니다. 저장소에는 키가 들어간 파일이 없습니다.
 
-1. [Kakao Developers](https://developers.kakao.com)에서 **애플리케이션을 추가**합니다.
-2. 앱 > **앱 키**에서 **JavaScript 키**를 복사합니다.
-3. 앱 > **플랫폼 > Web(JavaScript SDK 도메인)** 에 사이트 도메인 **`http://localhost:8000`** 을 등록합니다. (다른 포트/주소로 열면 등록한 도메인과 달라 인증에 실패합니다.)
-4. 앱 설정에서 **카카오맵**을 활성화(사용 설정)합니다.
-5. 키를 다음 중 한 곳에 넣습니다.
-   - **`public/js/config.local.js`** (권장): `public/js/config.local.example.js`를 `public/js/config.local.js`로 복사하고 `window.TP_CONFIG = { kakaoJsKey: '여기에 키' };`로 수정합니다. 이 파일은 `.gitignore`에 들어 있어 커밋되지 않습니다.
-   - **설정(⚙) > "카카오 JavaScript 키"** 입력란: 브라우저 `localStorage`에 저장되며 `config.local.js`보다 우선합니다. (JSON 내보내기와 계정에는 포함되지 않습니다.) 키를 바꾸면 **페이지를 새로고침**해야 적용됩니다.
+| 환경변수 | 카카오 키 | 용도 | 브라우저 전달 |
+|---|---|---|---|
+| `TP_KAKAO_JS_KEY` | JavaScript 키 | 지도 표시, 장소 검색, 좌표→주소 | 서버가 `/config.js`로 전달 (원래 공개되는 키, 등록 도메인에서만 동작) |
+| `TP_KAKAO_REST_KEY` | REST API 키 | 대중교통 경로·시간·요금 | **절대 전달하지 않음** (서버 전용 비밀) |
 
-동작 방식과 대체(fallback):
+1. [Kakao Developers](https://developers.kakao.com)에서 애플리케이션을 추가하고, **카카오맵 사용 설정**을 켭니다. (무료 쿼터는 개발자 계정당 처음 활성화한 앱 하나)
+2. 앱 > **플랫폼 키 > JavaScript 키 > JavaScript SDK 도메인**에 **`http://localhost:8000`** 을 등록합니다. ("제품 링크 관리"의 웹 도메인은 카카오톡 공유용이라 해당 없음)
+3. 같은 **플랫폼 키** 화면에서 JavaScript 키와 REST API 키를 복사합니다. REST API 키의 `호출 허용 IP`는 비워 둬도 됩니다.
+4. **`start.bat`을 실행**하면 비어 있는 키를 물어보고 사용자 환경변수에 저장(`setx`)합니다. 직접 등록하려면:
+   ```bat
+   setx TP_KAKAO_JS_KEY "JavaScript 키"
+   setx TP_KAKAO_REST_KEY "REST API 키"
+   ```
+   `setx`는 **새로 여는 창부터** 적용됩니다. 키를 바꾼 뒤에는 서버를 다시 시작하세요. 서버를 켜면 콘솔에 각 키의 설정 여부(값은 출력하지 않음)가 표시됩니다.
+
+키가 없어도 앱은 실행됩니다. JavaScript 키가 없으면 지도 대신 설정 안내가 뜨고 장소 검색은 Nominatim으로 대체되며, REST 키가 없으면 대중교통은 추정치로 계산됩니다.
+
+### 지도·검색 동작 방식과 대체(fallback)
 
 - SDK는 `js/kakao.js`의 공유 로더가 `https://dapi.kakao.com/v2/maps/sdk.js?...&libraries=services&autoload=false`를 한 번만 불러오며, 지도(`map.js`)와 검색(`geocode.js`)이 함께 사용합니다.
 - 키가 없거나 SDK 로드에 실패하면(잘못된 키/도메인 미등록/카카오맵 미활성화/네트워크 오류, 8초 시간 초과) 지도 영역에 원인과 설정 방법이 표시됩니다. 일정 편집, 비용 계산, 저장은 그대로 쓸 수 있고 장소 검색은 Nominatim으로 대체됩니다. 설정 창에서 현재 상태(사용 중/실패 사유)를 확인할 수 있습니다.
@@ -111,17 +120,11 @@ DB 테이블: `users`(아이디, 비밀번호 해시, 설정 JSON), `sessions`(�
 - 지도 클릭 역지오코딩: 카카오 `coord2Address`로 건물명 > 도로명주소 > 지번주소 순으로 이름을 채우고, 실패하거나 결과가 없으면 Nominatim을 사용합니다.
 - 다크 모드에서도 지도 타일은 어둡게 바꾸지 않고 그대로 표시합니다(마커/말풍선만 읽기 쉽게 유지).
 
-## 카카오 REST API 키 설정(대중교통)
+## 대중교통 조회 (카카오 REST API)
 
-실제 대중교통 경로·시간·요금은 카카오맵 대중교통 길찾기 REST API로 조회합니다. 키는 서버에만 두고 브라우저로 보내지 않습니다.
+실제 대중교통 경로·시간·요금은 카카오맵 대중교통 길찾기 REST API로 조회합니다. 키(`TP_KAKAO_REST_KEY`)는 서버만 읽고 브라우저로 보내지 않습니다.
 
-1. [Kakao Developers](https://developers.kakao.com) > 내 애플리케이션 > **앱 설정 > 앱 > 플랫폼 키 > REST API 키**를 복사합니다. (`호출 허용 IP`는 비워 둬도 됩니다.) 카카오맵 사용 설정이 되어 있어야 합니다.
-2. `config.local.example.json`을 **`config.local.json`** 으로 복사하고 키를 넣습니다. (`.gitignore` 대상이라 커밋되지 않습니다.)
-   ```json
-   { "kakaoRestKey": "여기에 REST API 키" }
-   ```
-   또는 환경변수 `KAKAO_REST_KEY`로 지정합니다(설정 파일보다 우선). 서버 실행 중에 파일을 새로 만들어도 몇 초 안에 적용됩니다.
-3. 조회 결과는 SQLite에 캐시되므로 같은 구간(좌표 소수 5자리 기준)은 7일 동안 카카오를 다시 호출하지 않습니다.
+- 조회 결과는 SQLite에 캐시되므로 같은 구간(좌표 소수 5자리 기준)은 7일 동안 카카오를 다시 호출하지 않습니다.
 
 대체(fallback) 동작:
 
@@ -147,14 +150,12 @@ server/db.js            SQLite(node:sqlite) 연결, 스키마, 쿼리
 server/auth.js          scrypt 해시, 세션 토큰/쿠키, 로그인 시도 제한
 server/static.js        public/ 정적 파일 제공 (경로 이탈 방지)
 server/transit.js       카카오 대중교통 REST 프록시 (키 관리, 응답 정규화, SQLite 캐시, 호출 제한)
-config.local.json       (선택, 커밋 안 됨) { "kakaoRestKey": "..." }. 예시는 config.local.example.json
 package.json            "start": "node server.js" (의존성 없음)
 start.bat               Windows용 실행 스크립트 (서버 실행 + 브라우저 열기)
 data/tripplanner.db     (자동 생성, 커밋 안 됨) 계정/여행 데이터
 public/
   index.html            페이지 골격, 스크립트 로드
   css/style.css         스타일 (CSS 변수, 라이트/다크, 반응형)
-  js/config.local.js    (선택, 커밋 안 됨) 카카오 JavaScript 키. 예시는 config.local.example.js
   js/fare.js            요금 계산 + 기본 설정
   js/storage.js         상태/localStorage 저장(게스트/사용자 캐시), 정규화, JSON 내보내기·가져오기
   js/sample.js          첫 실행용 샘플 여행

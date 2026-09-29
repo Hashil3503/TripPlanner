@@ -723,7 +723,6 @@ fieldset .hint { margin: 0; }
 .field-input { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .dialog-form .field-input input { width: 104px; height: 34px; text-align: right; }
 .unit { width: 40px; font-size: 12px; color: var(--muted); }
-.key-row input { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 13px !important; }
 
 /* ---- 토스트 ---- */
 .toast {
