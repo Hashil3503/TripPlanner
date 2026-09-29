@@ -164,6 +164,18 @@
     return true;
   }
 
+  /** 로그아웃/세션 만료 시 이 기기에 남은 사용자 캐시를 지운다 (공용 PC 대비). 대기 중인 저장도 취소. */
+  function clearUserCache(username) {
+    clearTimeout(saveTimer);
+    const key = userKey(username);
+    if (storageKey === key) storageKey = KEY;
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      /* 저장소 접근 불가: 지울 것도 없음 */
+    }
+  }
+
   /** 서버 데이터로 상태를 교체한다. 화면 상태(현재 여행/일차)는 사용자 캐시에서 이어받는다. */
   function loadFromServer(username, trips, settings) {
     const prev = readSaved(userKey(username));
@@ -243,5 +255,5 @@
     state.settings = mergeSettings(TP.fare.DEFAULT_CONFIG, null);
   }
 
-  TP.store = { state, hooks, load, useUserCache, loadFromServer, normServerTrip, isSample, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, exportJSON, importJSON, resetSettings, uid };
+  TP.store = { state, hooks, load, useUserCache, clearUserCache, loadFromServer, normServerTrip, isSample, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, exportJSON, importJSON, resetSettings, uid };
 })();
