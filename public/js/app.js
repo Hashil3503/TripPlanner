@@ -924,21 +924,8 @@
 
   function openSettings() {
     buildSettingsFields();
-    $('#kakaoKeyInput').value = TP.kakao.getStoredKey();
     refreshKakaoStatus();
     $('#settingsDialog').showModal();
-  }
-
-  function submitKakaoKey() {
-    const G = TP.kakao;
-    const v = $('#kakaoKeyInput').value.trim();
-    if (v === G.getStoredKey()) return;
-    if (v && !G.isValidKey(v)) {
-      toast('카카오 키 형식이 올바르지 않아 저장하지 않았어요');
-      return;
-    }
-    G.setStoredKey(v);
-    toast('카카오 키를 저장했어요. 적용하려면 페이지를 새로고침하세요');
   }
 
   function submitSettings() {
@@ -956,7 +943,6 @@
     $('#settingsDialog').close();
     renderAll();
     toast('설정을 저장했어요');
-    submitKakaoKey(); // 키가 바뀌었으면 위 토스트를 덮어쓰며 새로고침 안내
   }
 
   // ---- 테마 표시 (헤더 아이콘 + 메뉴/설정의 선택 상태) ----
