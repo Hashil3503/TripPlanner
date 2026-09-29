@@ -171,6 +171,7 @@
     again = false;
     snap.clear();
     settingsSnap = '';
+    if (user) S.clearUserCache(user.username);
     user = null;
     writeLastUser('');
     S.load(); // 게스트 localStorage 데이터로 복귀

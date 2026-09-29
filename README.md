@@ -44,7 +44,7 @@
 | --- | --- |
 | 로그인 (계정, 여행, 설정) | **`data/tripplanner.db`** (SQLite 파일, 서버가 처음 실행될 때 자동 생성). 이 파일을 복사해 두면 백업됩니다. `.gitignore`에 들어 있어 커밋되지 않습니다. |
 | 게스트 | 브라우저 `localStorage` (`tripplanner.state.v1`) |
-| 로그인 사용자 캐시 | 브라우저 `localStorage` (`tripplanner.state.v1.user.<아이디>`) — 서버 데이터가 우선 |
+| 로그인 사용자 캐시 | 브라우저 `localStorage` (`tripplanner.state.v1.user.<소문자 아이디>`) — 서버 데이터가 우선, 로그아웃·세션 만료 시 삭제 |
 | 경로 조회 캐시(대중교통 포함, `tripplanner.routecache.v2`), 카카오 JavaScript 키(설정 창 입력값) | 브라우저 `localStorage` |
 | 카카오 REST API 키 | 서버의 **`config.local.json`**(`.gitignore` 대상) 또는 환경변수 `KAKAO_REST_KEY`. 브라우저로는 절대 전달되지 않습니다. |
 | 대중교통 조회 캐시 | `data/tripplanner.db`의 `transit_cache` 테이블 (성공 7일, 경로 없음 1일) |
