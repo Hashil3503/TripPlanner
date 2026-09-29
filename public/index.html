@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light" data-theme-pref="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>여행 플래너</title>
+  <meta name="description" content="지도를 보며 동선을 짜고, 이동 시간과 교통비를 자동으로 계산해 주는 여행 플래너">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233563e9'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Cpath d='m20.5 11.5-2.2 6.8-6.8 2.2 2.2-6.8z' fill='%23fff'/%3E%3C/svg%3E">
+  <!-- 첫 페인트 전에 테마를 적용해 깜빡임을 막는다 (저장된 선택 > 시스템 설정) -->
+  <script>
+    (function () {
+      var pref = 'system';
+      try { var v = localStorage.getItem('tripplanner.theme'); if (v === 'light' || v === 'dark' || v === 'system') pref = v; } catch (e) {}
+      var dark = pref === 'dark' || (pref === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      var r = document.documentElement;
+      r.setAttribute('data-theme', dark ? 'dark' : 'light');
+      r.setAttribute('data-theme-pref', pref);
+    })();
+  </script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 아이콘 스프라이트 (Lucide 스타일, 1.75 stroke, currentColor) -->
+  <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
+      <symbol id="i-login" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+      <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+      <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="1"/><path d="M7 21l3-4"/><path d="m16 21-2-4-3-3 1-6"/><path d="m6 12 2-3 4-1 3 3 3 1"/></symbol>
+      <symbol id="i-bike" viewBox="0 0 24 24"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></symbol>
+      <symbol id="i-bus" viewBox="0 0 24 24"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></symbol>
+      <symbol id="i-train" viewBox="0 0 24 24"><path d="M8 3.1V7a4 4 0 0 0 8 0V3.1"/><path d="m9 15-1-1"/><path d="m15 15 1-1"/><path d="M9 19c-2.8 0-5-2.2-5-5v-4a8 8 0 0 1 16 0v4c0 2.8-2.2 5-5 5Z"/><path d="m8 19-2 3"/><path d="m16 19 2 3"/></symbol>
+      <symbol id="i-car" viewBox="0 0 24 24"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></symbol>
+      <symbol id="i-taxi" viewBox="0 0 24 24"><path d="M10 2h4"/><path d="m21 8-2 2-1.5-3.7A2 2 0 0 0 15.646 5H8.4a2 2 0 0 0-1.903 1.257L5 10 3 8"/><path d="M7 14h.01"/><path d="M17 14h.01"/><rect width="18" height="8" x="3" y="10" rx="2"/><path d="M5 18v2"/><path d="M19 18v2"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+      <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-chevrons-down-up" viewBox="0 0 24 24"><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></symbol>
+      <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+      <symbol id="i-alert"viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+      <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></symbol>
+      <symbol id="i-landmark" viewBox="0 0 24 24"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 20 7H4Z"/></symbol>
+      <symbol id="i-utensils" viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></symbol>
+      <symbol id="i-bed" viewBox="0 0 24 24"><path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/></symbol>
+      <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/></symbol>
+      <symbol id="i-bag" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="topbar">
+    <h1 class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-compass"/></svg></span>
+      <span class="brand-name">여행 플래너</span>
+    </h1>
+
+    <div class="menu-wrap trip-switch">
+      <button class="trip-btn" id="tripMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tripMenu" title="여행 선택">
+        <span class="trip-btn-label" id="tripLabel"></span>
+        <svg class="icon chev" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+      </button>
+      <div class="menu" id="tripMenu" role="menu" aria-label="여행 선택" hidden></div>
+    </div>
+
+    <div class="menu-wrap">
+      <button class="icon-btn" id="tripMoreBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tripMoreMenu" aria-label="여행 메뉴" title="여행 메뉴">
+        <svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>
+      </button>
+      <div class="menu" id="tripMoreMenu" role="menu" aria-label="여행 메뉴" hidden>
+        <button class="menu-item" id="btnEditTrip" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>이름·날짜 수정</button>
+        <button class="menu-item" id="btnNewTrip" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>새 여행</button>
+        <div class="menu-sep" role="separator"></div>
+        <button class="menu-item" id="btnExport" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>내보내기</button>
+        <button class="menu-item" id="btnImport" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>가져오기</button>
+        <button class="menu-item only-mobile" id="btnSettingsMenu" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>설정</button>
+        <div class="menu-sep" role="separator"></div>
+        <button class="menu-item danger" id="btnDeleteTrip" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>여행 삭제</button>
+      </div>
+    </div>
+    <input type="file" id="fileImport" accept="application/json,.json" hidden>
+
+    <div class="top-right">
+      <button class="save-status" id="saveStatus" type="button" role="status" aria-live="polite" hidden>
+        <span class="save-dot" aria-hidden="true"></span><span class="save-text"></span>
+      </button>
+
+      <div class="menu-wrap">
+        <button class="icon-btn" id="themeBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="themeMenu" aria-label="테마" title="테마">
+          <svg class="icon" aria-hidden="true"><use id="themeIcon" href="#i-monitor"/></svg>
+        </button>
+        <div class="menu" id="themeMenu" role="menu" aria-label="테마" hidden>
+          <button class="menu-item" type="button" role="menuitemradio" aria-checked="false" data-theme-choice="system"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg>시스템<svg class="icon menu-check" aria-hidden="true"><use href="#i-check"/></svg></button>
+          <button class="menu-item" type="button" role="menuitemradio" aria-checked="false" data-theme-choice="light"><svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg>라이트<svg class="icon menu-check" aria-hidden="true"><use href="#i-check"/></svg></button>
+          <button class="menu-item" type="button" role="menuitemradio" aria-checked="false" data-theme-choice="dark"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>다크<svg class="icon menu-check" aria-hidden="true"><use href="#i-check"/></svg></button>
+        </div>
+      </div>
+
+      <button class="icon-btn hide-mobile" id="btnSettings" type="button" aria-label="설정" title="설정">
+        <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>
+      </button>
+
+      <div class="auth-box">
+        <div class="auth-guest" id="authGuest">
+          <button class="btn ghost" id="btnLogin" type="button">로그인</button>
+          <button class="btn primary" id="btnSignup" type="button">회원가입</button>
+        </div>
+        <div class="menu-wrap only-mobile" id="guestMenuWrap">
+          <button class="icon-btn" id="guestMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="guestMenu" aria-label="계정" title="계정">
+            <svg class="icon" aria-hidden="true"><use href="#i-user"/></svg>
+          </button>
+          <div class="menu" id="guestMenu" role="menu" aria-label="계정" hidden>
+            <button class="menu-item" id="btnLoginMenu" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-login"/></svg>로그인</button>
+            <button class="menu-item" id="btnSignupMenu" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg>회원가입</button>
+          </div>
+        </div>
+        <div class="menu-wrap auth-user" id="authUser" hidden>
+          <button class="account-btn" id="userBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu" title="계정">
+            <span class="avatar" id="userAvatar" aria-hidden="true"></span>
+            <span class="user-name" id="userName"></span>
+            <svg class="icon chev" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+          </button>
+          <div class="menu" id="userMenu" role="menu" aria-label="계정" hidden>
+            <div class="menu-head"><span class="muted">로그인한 계정</span><strong id="userNameMenu"></strong></div>
+            <div class="menu-sep" role="separator"></div>
+            <button class="menu-item" id="btnLogout" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg>로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="guest-banner" id="guestBanner" hidden>
+    <span class="banner-text">로그인하면 일정이 계정에 저장돼요</span>
+    <button class="link" id="btnBannerLogin" type="button">로그인</button>
+    <button class="banner-close" id="btnBannerClose" type="button" title="닫기" aria-label="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+  </div>
+
+  <main class="layout">
+    <aside class="panel" id="panel">
+      <section class="search" id="searchBar" aria-label="장소 검색">
+        <div class="search-box">
+          <svg class="icon search-ico" aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="searchInput" type="search" placeholder="장소 검색 (예: 남산타워, 해운대)" autocomplete="off" aria-label="장소 검색">
+          <button class="btn primary small" id="btnSearch" type="button">검색</button>
+        </div>
+        <p class="hint">지도를 클릭해도 그 지점을 일정에 추가할 수 있어요.</p>
+        <ul id="searchResults" class="search-results" hidden></ul>
+      </section>
+
+      <nav class="day-tabs" id="dayTabs" role="tablist" aria-label="일차 선택"></nav>
+
+      <section class="day-toolbar" aria-label="일차 설정">
+        <div class="day-head">
+          <div class="day-title">
+            <strong id="dayLabel"></strong>
+            <span class="muted" id="dayDate"></span>
+          </div>
+          <div class="day-actions">
+            <button class="btn ghost small danger-ghost" id="btnDeleteDay" type="button" title="이 날 삭제">
+              <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span>이 날 삭제</span>
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-row">
+          <label class="inline">시작 <input type="time" id="startTime" value="09:00"></label>
+          <label class="inline">인원 <input type="number" id="peopleInput" min="1" max="99" step="1" value="1"><span>명</span></label>
+        </div>
+        <div class="toolbar-row view-row">
+          <button class="btn ghost small legs-toggle" id="btnLegsToggle" type="button" data-action="collapse" title="이동 구간 상세를 모두 접어요" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-chevrons-down-up"/></svg><span>모두 접기</span>
+          </button>
+          <label class="switch"><input type="checkbox" id="showAll"><span class="switch-track" aria-hidden="true"></span><span class="switch-text">전체 일차 지도 표시</span></label>
+        </div>
+        <div class="toolbar-row status-row" id="statusRow" hidden>
+          <span class="status" id="status" role="status" aria-live="polite"></span>
+          <button class="link" id="btnRetry" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>경로 다시 계산</button>
+        </div>
+      </section>
+
+      <ul class="items" id="itemList"></ul>
+      <p class="empty" id="emptyMsg" hidden>
+        <svg class="icon" aria-hidden="true"><use href="#i-map-pin"/></svg>
+        <span>아직 일정이 없어요.<br>위에서 장소를 검색하거나 지도를 클릭해 추가해 보세요.</span>
+      </p>
+
+      <section class="summary" id="daySummary" aria-label="하루 요약"></section>
+      <section class="summary" id="tripSummary" aria-label="여행 전체 요약"></section>
+
+      <footer class="foot">
+        지도 &copy; Kakao · 경로 OSRM(FOSSGIS) · 대중교통 카카오맵 · 택시 요금은 <b>추정치</b>입니다.
+      </footer>
+    </aside>
+
+    <div class="map-wrap">
+      <div id="map" aria-label="지도"></div>
+    </div>
+  </main>
+
+  <!-- 여행 생성/수정 -->
+  <dialog id="tripDialog" aria-labelledby="tripDialogTitle">
+    <form id="tripForm" method="dialog" class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="tripDialogTitle">새 여행</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <label>여행 이름<input id="tripName" type="text" maxlength="80" required></label>
+        <label>출발 날짜<input id="tripStart" type="date"></label>
+        <label>일수 (1~30)<input id="tripDays" type="number" min="1" max="30" step="1" value="1" required></label>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit">저장</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 일정 항목 편집 -->
+  <dialog id="itemDialog" aria-labelledby="itemDialogTitle">
+    <form id="itemForm" method="dialog" class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="itemDialogTitle">일정 수정</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <label>장소 이름<input id="itemName" type="text" maxlength="100" required></label>
+        <div class="grid2">
+          <label>위도<input id="itemLat" type="number" step="any" min="-90" max="90" required></label>
+          <label>경도<input id="itemLon" type="number" step="any" min="-180" max="180" required></label>
+        </div>
+        <div class="grid2">
+          <label>카테고리<select id="itemCat"></select></label>
+          <label>체류 시간 (분)<input id="itemStay" type="number" min="0" max="1440" step="5"></label>
+        </div>
+        <div class="grid2">
+          <label>입장료/기타 (1인, 원)<input id="itemCost" type="number" min="0" step="100"></label>
+          <label>주차비 (총액, 원)<input id="itemParking" type="number" min="0" step="100"></label>
+        </div>
+        <p class="hint">주차비는 이 장소까지 <b>자가용</b>으로 이동할 때만 반영됩니다.</p>
+        <label>일차 이동<select id="itemDay"></select></label>
+        <label>메모<textarea id="itemMemo" rows="3" maxlength="500"></textarea></label>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit">저장</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 설정 -->
+  <dialog id="settingsDialog" aria-labelledby="settingsDialogTitle">
+    <form id="settingsForm" method="dialog" class="dialog-form wide">
+      <header class="dlg-head">
+        <h2 id="settingsDialogTitle">설정</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <fieldset>
+          <legend>화면 테마</legend>
+          <div class="seg seg-wide" id="themeSeg" role="radiogroup" aria-label="화면 테마">
+            <button type="button" role="radio" aria-checked="false" data-theme-choice="system"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg>시스템</button>
+            <button type="button" role="radio" aria-checked="false" data-theme-choice="light"><svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg>라이트</button>
+            <button type="button" role="radio" aria-checked="false" data-theme-choice="dark"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>다크</button>
+          </div>
+          <p class="hint">바로 적용되고 이 브라우저에 저장돼요. 시스템을 고르면 기기 설정을 따라가요.</p>
+        </fieldset>
+        <fieldset>
+          <legend>지도 · 장소 검색 (카카오)</legend>
+          <label class="key-row">카카오 JavaScript 키
+            <input id="kakaoKeyInput" type="text" name="kakaoKey" autocomplete="off" spellcheck="false" placeholder="비워 두면 public/js/config.local.js 값 사용">
+          </label>
+          <p class="hint" id="kakaoKeyStatus"></p>
+          <p class="hint">Kakao Developers의 플랫폼(Web)에 <b>http://localhost:8000</b> 도메인을 등록하고, 앱 설정에서 <b>카카오맵</b>을 활성화해야 해요. 키가 없으면 지도를 표시할 수 없고, 장소 검색은 OSM(Nominatim)을 써요. 이 키는 이 브라우저에만 저장돼요.</p>
+        </fieldset>
+        <p class="hint set-intro">요금 기준의 기본값은 서울 2025년 교통카드/중형택시입니다. 지역이나 상황에 맞게 바꿔 보세요.</p>
+        <div id="settingsFields"></div>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn danger" type="button" id="btnResetSettings">기본값 복원</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit">저장</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 로그인 / 회원가입 -->
+  <dialog id="authDialog" aria-labelledby="authTitle">
+    <form id="authForm" method="dialog" class="dialog-form" novalidate>
+      <header class="dlg-head">
+        <h2 id="authTitle">로그인</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <div class="auth-tabs seg seg-wide" id="authTabs" role="tablist">
+          <button type="button" class="tab active" role="tab" aria-selected="true" data-mode="login">로그인</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-mode="signup">회원가입</button>
+        </div>
+        <label>아이디<input id="authName" type="text" name="username" maxlength="20" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+        <label>비밀번호<input id="authPass" type="password" name="password" maxlength="72" autocomplete="current-password"></label>
+        <label id="authPass2Row" hidden>비밀번호 확인<input id="authPass2" type="password" name="password2" maxlength="72" autocomplete="new-password"></label>
+        <p class="hint" id="authHint" hidden>아이디는 3~20자(영문, 숫자, 밑줄), 비밀번호는 8~72자예요.</p>
+        <p class="form-error" id="authError" role="alert" hidden></p>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit" id="authSubmit">로그인</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+  <script src="js/config.local.js"></script><!-- 없어도 됨(404 무시): 카카오 키. js/config.local.example.js 참고 -->
+  <script src="js/fare.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/sample.js"></script>
+  <script src="js/kakao.js"></script>
+  <script src="js/geocode.js"></script>
+  <script src="js/routing.js"></script>
+  <script src="js/planner.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1262 @@
+/* app.js - UI 조립: 렌더링, 이벤트, 다이얼로그. 사용자 입력 텍스트는 textContent로만 삽입한다. */
+(function () {
+  'use strict';
+  const TP = window.TP;
+  const S = TP.store;
+  const P = TP.planner;
+  const F = TP.fmt;
+  const MODES = TP.fare.MODES;
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const UI = TP.ui;
+  const icon = UI.icon;
+
+  /** DOM 생성 헬퍼 (innerHTML 미사용) */
+  function el(tag, props, children) {
+    const n = document.createElement(tag);
+    if (props) {
+      for (const [k, v] of Object.entries(props)) {
+        if (v == null || v === false) continue;
+        if (k === 'class') n.className = v;
+        else if (k === 'text') n.textContent = v;
+        else if (k === 'style') n.style.cssText = v; // 내부에서 만든 색상 값만 사용
+        else if (k === 'dataset') Object.assign(n.dataset, v);
+        else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+        else n.setAttribute(k, v === true ? '' : v);
+      }
+    }
+    for (const c of [].concat(children == null ? [] : children)) if (c != null && c !== false) n.append(c);
+    return n;
+  }
+
+  // ---- 앱 상태(저장 안 함) ----
+  let model = null; // 마지막 계산 결과
+  let selectedId = null;
+  let dragging = false;
+  let pendingRender = false;
+  const inflight = new Set(); // 경로 조회 중인 구간 key
+  let editingItemId = null;
+  let tripDialogMode = 'new';
+
+  // ---- 이동 구간 접기/펼치기 ----
+  // 전체 기본값은 localStorage, 구간별 예외는 이번 방문 동안만 메모리에 둔다 (키: 여행 id + 도착 장소 id)
+  const LEGS_KEY = 'tripplanner.legsCollapsed';
+  const legOverride = new Map();
+  let legsCollapsedDefault = (function () {
+    try {
+      return localStorage.getItem(LEGS_KEY) === '1';
+    } catch (e) {
+      return false; // 저장소를 못 쓰면 기본(펼침)
+    }
+  })();
+
+  const trip = () => S.currentTrip();
+  const day = () => S.currentDay();
+  const settings = () => S.state.settings;
+  const won = F.fmtWon;
+  const colorOf = (i) => P.DAY_COLORS[i % P.DAY_COLORS.length];
+
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  // =====================================================================
+  // 렌더링
+  // =====================================================================
+  function renderAll(opts) {
+    opts = opts || {};
+    S.clampDay();
+    model = P.buildTrip(trip(), settings());
+    renderTripSelect();
+    renderDayTabs();
+    renderToolbar();
+    renderSchedule();
+    renderSummary();
+    renderMap(!!opts.fit);
+    ensureRoutes();
+    updateStatus();
+  }
+
+  let rafId = 0;
+  function scheduleRender() {
+    if (dragging) {
+      pendingRender = true;
+      return;
+    }
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => renderAll());
+  }
+
+  /** 여행 선택 드롭다운: 버튼에 현재 여행 이름, 메뉴에 여행 목록 */
+  function renderTripSelect() {
+    const cur = trip();
+    $('#tripLabel').textContent = cur.name;
+    $('#tripMenuBtn').title = `여행 선택 · ${cur.name}`;
+    const key = cur.id + '\n' + S.state.trips.map((t) => t.id + '\t' + t.name).join('\n');
+    if (renderTripSelect.key === key) return; // 열려 있는 메뉴를 불필요하게 다시 그리지 않는다
+    renderTripSelect.key = key;
+    $('#tripMenu').replaceChildren(...S.state.trips.map((t) =>
+      el('button', {
+        type: 'button',
+        class: 'menu-item',
+        role: 'menuitemradio',
+        'aria-checked': String(t.id === cur.id),
+        onclick: () => selectTrip(t.id),
+      }, [el('span', { class: 'menu-label', text: t.name }), icon('check', 'menu-check')])
+    ));
+  }
+
+  function selectTrip(id) {
+    if (id === trip().id) return;
+    S.state.currentTripId = id;
+    S.state.dayIndex = 0;
+    selectedId = null;
+    S.save();
+    renderAll({ fit: true });
+  }
+
+  function renderDayTabs() {
+    const nav = $('#dayTabs');
+    const t = trip();
+    const tabs = t.days.map((d, i) =>
+      el('button', {
+        type: 'button',
+        class: 'day-tab' + (i === S.state.dayIndex ? ' active' : ''),
+        role: 'tab',
+        'aria-selected': String(i === S.state.dayIndex),
+        onclick: () => {
+          S.state.dayIndex = i;
+          selectedId = null;
+          S.save();
+          renderAll({ fit: true });
+        },
+      }, [el('span', { class: 'dot', style: `background:${colorOf(i)}` }), `${i + 1}일차`])
+    );
+    if (t.days.length < 30) {
+      tabs.push(el('button', { type: 'button', class: 'day-tab add', title: '하루 추가', 'aria-label': '하루 추가', onclick: addDay }, icon('plus')));
+    }
+    nav.replaceChildren(...tabs);
+    // 선택한 탭이 가로 스크롤 영역 밖이면 보이게 맞춘다
+    const active = nav.querySelector('.day-tab.active');
+    if (active) {
+      const a = active.getBoundingClientRect();
+      const n = nav.getBoundingClientRect();
+      if (a.left < n.left) nav.scrollLeft += a.left - n.left - 8;
+      else if (a.right > n.right) nav.scrollLeft += a.right - n.right + 8;
+    }
+  }
+
+  function renderToolbar() {
+    const i = S.state.dayIndex;
+    $('#dayLabel').textContent = `${i + 1}일차`;
+    $('#dayDate').textContent = F.fmtDate(F.dayDate(trip(), i));
+    if (document.activeElement !== $('#startTime')) $('#startTime').value = day().startTime;
+    if (document.activeElement !== $('#peopleInput')) $('#peopleInput').value = settings().people;
+    $('#showAll').checked = S.state.showAll;
+    $('#btnDeleteDay').hidden = trip().days.length <= 1;
+    renderLegsToggle();
+  }
+
+  // ---- 일정 목록 (타임라인) ----
+  function renderSchedule() {
+    const dm = model.days[S.state.dayIndex];
+    const list = $('#itemList');
+    const color = colorOf(dm.dayIndex);
+    list.style.setProperty('--day', color);
+    list.style.setProperty('--day-ink', UI.inkOn(color));
+    list.replaceChildren(...dm.rows.map((row, idx) => buildItem(row, idx, dm)));
+    $('#emptyMsg').hidden = dm.rows.length > 0;
+  }
+
+  function buildItem(row, idx, dm) {
+    const item = row.item;
+    const stay = Number(item.stay) || 0;
+    const timeText = stay > 0
+      ? `${F.fmtTime(row.arrival)} – ${F.fmtTime(row.departure)} · ${stay}분 체류`
+      : `${F.fmtTime(row.arrival)} 도착 · 체류 없음`;
+
+    const costChips = [];
+    if (item.cost > 0) costChips.push(el('span', { class: 'cost-chip' }, [icon('ticket'), `입장/기타 ${won(item.cost)}${settings().people > 1 ? '/인' : ''}`]));
+    if (item.parking > 0) costChips.push(el('span', { class: 'cost-chip' }, [icon('car'), `주차 ${won(item.parking)}`]));
+
+    const card = el('div', {
+      class: 'item-card',
+      tabindex: '0',
+      onclick: () => selectItem(item.id, { pan: true, popup: true }),
+      onkeydown: (e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          selectItem(item.id, { pan: true, popup: true });
+        }
+      },
+    }, [
+      el('span', { class: 'drag-handle', title: '끌어서 순서 변경', 'aria-label': '끌어서 순서 변경' }, icon('grip')),
+      el('div', { class: 'item-body' }, [
+        el('div', { class: 'item-title' }, [UI.catIcon(item.category), el('span', { class: 'name', text: item.name })]),
+        el('div', { class: 'item-times' + (row.late ? ' late' : '') }, [
+          icon(row.late ? 'alert' : 'clock'),
+          el('span', { text: timeText }),
+        ]),
+        item.memo ? el('div', { class: 'item-memo', text: item.memo }) : null,
+        costChips.length ? el('div', { class: 'item-costs' }, costChips) : null,
+      ]),
+      el('div', { class: 'item-actions' }, [
+        el('button', { type: 'button', class: 'icon-btn sm', title: '수정', 'aria-label': `${item.name} 수정`, onclick: (e) => { e.stopPropagation(); openItemDialog(item.id); } }, icon('pencil')),
+        el('button', { type: 'button', class: 'icon-btn sm danger', title: '삭제', 'aria-label': `${item.name} 삭제`, onclick: (e) => { e.stopPropagation(); deleteItem(item.id); } }, icon('trash')),
+      ]),
+    ]);
+
+    return el('li', {
+      class: 'item' + (item.id === selectedId ? ' selected' : '') + (row.late ? ' over-midnight' : ''),
+      dataset: { id: item.id },
+    }, [
+      row.leg ? buildLeg(row.leg, item) : null,
+      el('div', { class: 'stop' }, [buildNode(idx, dm), card]),
+    ]);
+  }
+
+  /** 타임라인 노드. 다음 장소로 가는 구간이 있으면 그 구간을 접고 펴는 버튼이 된다. */
+  function buildNode(idx, dm) {
+    const num = String(idx + 1);
+    const next = dm.rows[idx + 1];
+    if (!next || !next.leg) return el('span', { class: 'node', text: num });
+    const collapsed = isLegCollapsed(next.item.id);
+    return el('button', {
+      type: 'button',
+      class: 'node node-btn',
+      'data-node-for': legKey(next.item.id),
+      'aria-controls': 'leg-body-' + next.item.id,
+      'aria-expanded': String(!collapsed),
+      title: `${num}→${idx + 2} 이동 정보 ${collapsed ? '펼치기' : '접기'}`,
+      'aria-label': `${num}번 → ${idx + 2}번 이동 정보 ${collapsed ? '펼치기' : '접기'}`,
+      onclick: () => {
+        const legEl = document.querySelector(`#itemList .leg[data-key="${CSS.escape(legKey(next.item.id))}"]`);
+        if (legEl) toggleLeg(legEl);
+      },
+    }, [el('span', { text: num }), icon('chevron-down', 'node-chev')]);
+  }
+
+  /** 구간 상태에 맞춰 앞쪽 노드 버튼의 aria/툴팁을 갱신 */
+  function syncNode(key, collapsed) {
+    const nb = document.querySelector(`#itemList .node-btn[data-node-for="${CSS.escape(key)}"]`);
+    if (!nb) return;
+    nb.setAttribute('aria-expanded', String(!collapsed));
+    const verb = collapsed ? '펼치기' : '접기';
+    nb.title = nb.title.replace(/(펼치기|접기)$/, verb);
+    nb.setAttribute('aria-label', nb.getAttribute('aria-label').replace(/(펼치기|접기)$/, verb));
+  }
+
+  function legCostText(leg) {
+    const c = leg.cost;
+    const people = settings().people;
+    const share = people > 1 ? ` (1인 ${won(c.perPerson)})` : '';
+    switch (leg.mode) {
+      case 'walk':
+      case 'bike':
+        return '0원';
+      case 'transit':
+        return `${won(c.total)}${share}`;
+      case 'taxi':
+        return `${won(c.total)}${share}`;
+      case 'car':
+        return `${won(c.total)}${share}`;
+      default:
+        return '';
+    }
+  }
+
+  const legKey = (itemId) => trip().id + ':' + itemId;
+  const isLegCollapsed = (itemId) => {
+    const k = legKey(itemId);
+    return legOverride.has(k) ? legOverride.get(k) : legsCollapsedDefault;
+  };
+
+  /** 접힌 행의 짧은 비용 (걷기/자전거는 0원) */
+  const legCostShort = (leg) => (leg.mode === 'walk' || leg.mode === 'bike' ? '0원' : won(leg.cost.total));
+
+  /** 구간 DOM의 접힘 상태를 맞춘다: 안 보이는 쪽은 inert로 포커스/스크린리더에서 제외 */
+  function applyLegDom(legEl, collapsed) {
+    legEl.dataset.collapsed = String(collapsed);
+    for (const b of legEl.querySelectorAll('[data-leg-toggle]')) b.setAttribute('aria-expanded', String(!collapsed));
+    legEl.querySelector('.leg-pane-min').inert = !collapsed;
+    legEl.querySelector('.leg-pane-full').inert = collapsed;
+    syncNode(legEl.dataset.key, collapsed);
+  }
+
+  function toggleLeg(legEl) {
+    const collapsed = legEl.dataset.collapsed !== 'true';
+    legOverride.set(legEl.dataset.key, collapsed);
+    const hadFocus = legEl.contains(document.activeElement); // 노드에서 눌렀으면 포커스는 노드에 그대로 둔다
+    applyLegDom(legEl, collapsed);
+    if (hadFocus) legEl.querySelector(collapsed ? '.leg-summary' : '.leg-collapse').focus(); // 눌렀던 버튼이 숨겨지므로 짝 버튼으로
+    renderLegsToggle();
+  }
+
+  /** 오늘 일차 구간이 하나라도 펼쳐져 있으면 "모두 접기", 아니면 "모두 펼치기" */
+  function renderLegsToggle() {
+    const btn = $('#btnLegsToggle');
+    if (!btn || !model) return;
+    const legs = model.days[S.state.dayIndex].rows.filter((r) => r.leg);
+    btn.hidden = legs.length === 0;
+    const anyOpen = legs.some((r) => !isLegCollapsed(r.item.id));
+    btn.dataset.action = anyOpen ? 'collapse' : 'expand';
+    btn.querySelector('span').textContent = anyOpen ? '모두 접기' : '모두 펼치기';
+    btn.title = anyOpen ? '이동 구간 상세를 모두 접어요' : '이동 구간 상세를 모두 펼쳐요';
+    btn.querySelector('use').setAttribute('href', anyOpen ? '#i-chevrons-down-up' : '#i-chevrons-up-down');
+  }
+
+  function setAllLegs(collapsed) {
+    legsCollapsedDefault = collapsed;
+    legOverride.clear();
+    try {
+      localStorage.setItem(LEGS_KEY, collapsed ? '1' : '0');
+    } catch (e) {
+      /* 이번 방문에만 적용 */
+    }
+    for (const legEl of document.querySelectorAll('#itemList .leg')) applyLegDom(legEl, collapsed);
+    renderLegsToggle();
+  }
+
+  /** 장소 사이의 이동 구간: 타임라인 위의 가벼운 연결 행. 접으면 한 줄(이동수단·시간·비용)만 남는다. */
+  function buildLeg(leg, item) {
+    const modes = MODES.map((m) => {
+      const on = m.id === leg.mode;
+      return el('button', {
+        type: 'button',
+        class: `seg-btn m-${m.id}` + (on ? ' active' : ''),
+        title: m.label,
+        'aria-label': m.label,
+        'aria-pressed': String(on),
+        onclick: () => setMode(item.id, m.id),
+      }, [UI.modeIcon(m.id), on ? el('span', { class: 'seg-label', text: m.label }) : null]);
+    });
+
+    const tags = [];
+    const notes = []; // 접힌 행의 경고 아이콘에 담을 안내
+    if (leg.loading) tags.push(el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']));
+    else if (leg.estimated) {
+      tags.push(el('span', { class: 'tag warn', text: '추정(직선거리 기반)' }));
+      notes.push('추정(직선거리 기반)');
+    }
+    if (leg.transit) {
+      tags.push(el('span', { class: 'tag', title: leg.fallbackReason || '', text: '대중교통 추정' }));
+      notes.push('대중교통 추정');
+    }
+    if (leg.transitReal && !leg.transitReal.fareKnown) {
+      tags.push(el('span', { class: 'tag warn', title: '카카오가 요금을 하나로 알려주지 않아 거리 기준 요금으로 추정했어요', text: '요금 추정' }));
+      notes.push('요금 추정');
+    }
+    if (leg.cost.surchargeRate > 0) {
+      const t = `심야할증 +${Math.round(leg.cost.surchargeRate * 100)}%`;
+      tags.push(el('span', { class: 'tag warn', text: t }));
+      notes.push(t);
+    }
+
+    const details = [];
+    if (leg.mode === 'car') {
+      details.push(`연료비 ${won(leg.cost.fuel)}` + (leg.cost.parking ? ` + 주차 ${won(leg.cost.parking)}` : '') + ' · 통행료 미포함');
+    } else if (leg.mode === 'taxi' && settings().people > 1) {
+      details.push('택시 요금은 인원이 나눠 낸다고 가정');
+    } else if (leg.transit && leg.fallbackReason) {
+      details.push(leg.fallbackReason);
+    }
+
+    const top = [el('div', { class: 'seg leg-modes', role: 'group', 'aria-label': '이동수단' }, modes)];
+    if (!leg.auto) top.push(el('button', { type: 'button', class: 'link auto-btn', title: '거리에 따라 자동 선택', text: '자동 선택', onclick: () => setMode(item.id, null) }));
+
+    const bodyId = 'leg-body-' + item.id;
+    const modeLabel = (MODES.find((m) => m.id === leg.mode) || {}).label || '';
+    const summaryText = `${F.fmtDuration(leg.durationMin)} · ${legCostShort(leg)}`;
+    const warnText = notes.join(', ');
+
+    const legEl = el('div', { class: 'leg' + (leg.loading ? ' is-loading' : ''), dataset: { key: legKey(item.id) } }, [
+      // 접힌 상태: 이동수단 아이콘 + 시간 · 비용 (+ 경고) + 펼침 화살표
+      el('div', { class: 'leg-pane leg-pane-min' }, el('div', { class: 'leg-pane-in' },
+        el('button', {
+          type: 'button',
+          class: 'leg-summary',
+          'data-leg-toggle': '',
+          'aria-expanded': 'false',
+          'aria-controls': bodyId,
+          'aria-label': `이동 구간 상세 펼치기: ${modeLabel} ${summaryText}` + (leg.loading ? ', 계산 중' : '') + (warnText ? `, ${warnText}` : ''),
+          onclick: (e) => toggleLeg(e.currentTarget.closest('.leg')),
+        }, [
+          UI.modeIcon(leg.mode, `leg-mode-ico m-${leg.mode}`),
+          el('span', { class: 'leg-sum-text', text: summaryText }),
+          leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']) : null,
+          warnText ? el('span', { class: 'leg-warn', title: warnText }, icon('alert')) : null,
+          icon('chevron-down', 'leg-chev'),
+        ]))),
+      // 펼친 상태: 기존 상세 내용
+      el('div', { class: 'leg-pane leg-pane-full', id: bodyId }, el('div', { class: 'leg-pane-in' },
+        el('div', { class: 'leg-content' }, [
+          el('div', { class: 'leg-top' }, top),
+          el('div', { class: 'leg-info-row' }, [
+            el('div', { class: 'leg-info' }, [
+              el('span', { class: 'leg-stat', text: F.fmtDuration(leg.durationMin) }),
+              el('span', { class: 'leg-stat', text: F.fmtDist(leg.distance) }),
+              el('span', { class: 'leg-stat cost', text: legCostText(leg) }),
+              ...tags,
+            ]),
+            el('button', {
+              type: 'button',
+              class: 'icon-btn sm leg-collapse',
+              'data-leg-toggle': '',
+              'aria-expanded': 'true',
+              'aria-controls': bodyId,
+              title: '이동 구간 접기',
+              'aria-label': '이동 구간 상세 접기',
+              onclick: (e) => toggleLeg(e.currentTarget.closest('.leg')),
+            }, icon('chevron-down', 'leg-chev')),
+          ]),
+          leg.transitReal ? buildTransitRoute(leg.transitReal, item) : null,
+          details.length ? el('div', { class: 'leg-detail', text: details.join(' · ') }) : null,
+        ]))),
+    ]);
+    applyLegDom(legEl, isLegCollapsed(item.id));
+    return legEl;
+  }
+
+  /** 대중교통 실경로: 노선 배지 + 대안 경로 선택 + 카카오맵 링크 */
+  function buildTransitRoute(tr, item) {
+    const r = tr.route;
+    const label = (x, i) => {
+      const fare = x.fare != null ? won(x.fare) : '요금 미상';
+      return `${P.routeTypeLabel(x)} ${F.fmtDuration(Math.ceil(x.totalTime / 60 - 1e-9))} ${fare}` + (x.transfers > 0 ? ` · 환승 ${x.transfers}회` : '') + (i === tr.defaultIdx ? ' (최단)' : '');
+    };
+    const row = [];
+    if (tr.routes.length > 1) {
+      const sel = el('select', { class: 'alt-select', title: '다른 대중교통 경로 선택', 'aria-label': '대중교통 경로 선택' },
+        tr.routes.map((x, i) => el('option', { value: String(i), text: label(x, i) })));
+      sel.value = String(tr.idx);
+      sel.addEventListener('change', () => setTransitIdx(item.id, Number(sel.value)));
+      row.push(sel);
+    }
+    if (tr.landingURL) row.push(el('a', { class: 'ext-link', href: tr.landingURL, target: '_blank', rel: 'noopener' }, ['카카오맵에서 보기', icon('external')]));
+    return el('div', { class: 'leg-transit' }, [
+      el('div', { class: 'leg-route' }, [UI.routePills(r), el('span', { class: 'route-meta', text: r.transfers > 0 ? `환승 ${r.transfers}회` : '환승 없음' })]),
+      row.length ? el('div', { class: 'leg-alt' }, row) : null,
+    ]);
+  }
+
+  // ---- 요약 ----
+  const tile = (label, value, sub, cls) =>
+    el('div', { class: 'tile' + (cls ? ' ' + cls : '') }, [el('span', { class: 'tile-label', text: label }), el('strong', { class: 'tile-value', text: value }), sub ? el('span', { class: 'tile-sub', text: sub }) : null]);
+
+  const BAR_ROWS = [
+    { id: 'walk', label: '도보', ico: 'walk' },
+    { id: 'bike', label: '자전거', ico: 'bike' },
+    { id: 'transit', label: '대중교통', ico: 'bus' },
+    { id: 'taxi', label: '택시', ico: 'taxi' },
+    { id: 'car', label: '자가용(연료·주차)', ico: 'car' },
+    { id: 'extra', label: '입장·기타', ico: 'ticket' },
+  ];
+
+  function renderSummary() {
+    const idx = S.state.dayIndex;
+    const dm = model.days[idx];
+    const s = dm.stats;
+    const people = model.people;
+
+    const dayBox = $('#daySummary');
+    const dayKids = [
+      el('h3', {}, [el('span', { class: 'dot', style: `background:${colorOf(idx)}` }), `${idx + 1}일차 요약`]),
+      el('div', { class: 'tiles' }, [
+        tile('이동 시간', F.fmtDuration(s.travelMin)),
+        tile('이동 거리', F.fmtDist(s.distance)),
+        tile('교통비', won(s.transport), people > 1 ? `1인 ${won(s.transport / people)}` : ''),
+        tile('입장·기타', won(s.extra), people > 1 ? `1인 ${won(s.extra / people)}` : ''),
+        tile('하루 합계', won(s.total), people > 1 ? `1인 ${won(s.total / people)}` : '', 'accent total'),
+      ]),
+    ];
+    if (dm.rows.length) dayKids.push(el('p', { class: 'summary-note' }, [icon('clock'), `일정 종료 예정 ${F.fmtTime(s.end)}`]));
+    if (s.late) dayKids.push(el('p', { class: 'warn-box' }, [icon('alert'), el('span', { text: `이 날의 일정이 자정을 넘깁니다 (종료 ${F.fmtTime(s.end)}). 체류 시간이나 순서를 조정해 보세요.` })]));
+    dayBox.replaceChildren(...dayKids);
+
+    // 여행 전체
+    const t = model.totals;
+    const rows = BAR_ROWS.map((r) => ({ ...r, value: r.id === 'extra' ? t.extra : t.byMode[r.id] }));
+    const max = Math.max(...rows.map((r) => r.value), 1);
+
+    const bars = rows.filter((r) => r.value > 0).map((r) =>
+      el('div', { class: 'bar-row' }, [
+        el('div', { class: 'bar-top' }, [
+          el('span', { class: 'bar-label' }, [icon(r.ico, `m-${r.id}`), r.label]),
+          el('span', { class: 'bar-value', text: `${won(r.value)} (${Math.round((r.value / t.total) * 100)}%)` }),
+        ]),
+        el('div', { class: 'bar-track' }, [el('div', { class: `bar-fill bar-${r.id}`, style: `width:${Math.max(2, (r.value / max) * 100)}%` })]),
+      ])
+    );
+
+    const dayRows = model.days.map((d, i) =>
+      el('button', {
+        type: 'button',
+        class: 'day-row' + (i === idx ? ' active' : ''),
+        onclick: () => { S.state.dayIndex = i; selectedId = null; S.save(); renderAll({ fit: true }); },
+      }, [
+        el('span', { class: 'dot', style: `background:${colorOf(i)}` }),
+        el('span', { class: 'day-row-name', text: `${i + 1}일차` }),
+        el('strong', { class: 'day-row-total', text: won(d.stats.total) }),
+        el('span', { class: 'day-row-sub', text: `${d.rows.length}곳 · ${F.fmtDuration(d.stats.travelMin)} · ${F.fmtDist(d.stats.distance)}` }),
+      ])
+    );
+
+    $('#tripSummary').replaceChildren(
+      el('h3', { text: `여행 전체 (${people}명)` }),
+      el('div', { class: 'tiles' }, [
+        tile('총 이동 시간', F.fmtDuration(t.travelMin)),
+        tile('총 이동 거리', F.fmtDist(t.distance)),
+        tile('총 교통비', won(t.transport)),
+        tile('총 입장·기타', won(t.extra)),
+        tile('전체 합계', won(t.total), `1인당 합계 ${won(t.perPerson)}`, 'accent total'),
+      ]),
+      el('h4', { text: '비용 구성' }),
+      bars.length ? el('div', { class: 'bars' }, bars) : el('p', { class: 'muted small', text: '아직 계산된 비용이 없어요.' }),
+      el('h4', { text: '일차별 합계' }),
+      el('div', { class: 'day-rows' }, dayRows),
+      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)이며, 조회가 안 되면 추정값입니다. 택시 요금은 추정치이고 통행료(고속도로)는 포함되지 않습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
+    );
+  }
+
+  function updateStatus() {
+    const status = $('#status');
+    const retry = $('#btnRetry');
+    const failed = model ? model.totals.failedLegs : 0;
+    if (inflight.size > 0) {
+      status.replaceChildren(el('span', { class: 'spinner' }), ` 경로 계산 중… (${inflight.size})`);
+      status.className = 'status busy';
+      retry.hidden = true;
+    } else if (failed > 0) {
+      status.replaceChildren(icon('alert'), ` ${failed}개 구간은 경로 조회 실패로 추정값 사용`);
+      status.className = 'status warn';
+      retry.hidden = false;
+    } else {
+      status.textContent = '';
+      status.className = 'status';
+      retry.hidden = true;
+    }
+    $('#statusRow').hidden = inflight.size === 0 && failed === 0;
+  }
+
+  // ---- 지도 ----
+  function renderMap(fit) {
+    const groups = [];
+    model.days.forEach((dm, i) => {
+      const active = i === S.state.dayIndex;
+      if (!S.state.showAll && !active) return;
+      groups.push({
+        dayIndex: i,
+        color: colorOf(i),
+        active,
+        points: dm.rows.map((r, n) => ({ item: r.item, number: n + 1, arrival: r.arrival })),
+        legs: dm.rows.filter((r) => r.leg).map((r) => r.leg),
+      });
+    });
+    TP.map.render({ groups, selectedId });
+    if (fit) TP.map.fit();
+  }
+
+  // ---- 경로 비동기 조회: 캐시에 없는 구간만 요청하고, 도착하는 대로 다시 그린다 ----
+  function ensureRoutes() {
+    for (const dm of model.days) {
+      const prio = dm.dayIndex === S.state.dayIndex ? 0 : 1;
+      for (const r of dm.rows) {
+        const leg = r.leg;
+        if (!leg || !leg.loading) continue;
+        const k = TP.routing.key(leg.from, leg.to, leg.profile);
+        if (inflight.has(k)) continue;
+        inflight.add(k);
+        TP.routing.get(leg.from, leg.to, leg.profile, prio).then(() => {
+          inflight.delete(k);
+          scheduleRender();
+        });
+      }
+    }
+  }
+
+  // =====================================================================
+  // 동작
+  // =====================================================================
+  function selectItem(id, o) {
+    o = o || {};
+    selectedId = id;
+    for (const n of document.querySelectorAll('#itemList .item.selected')) n.classList.remove('selected');
+    const li = $(`#itemList [data-id="${CSS.escape(id)}"]`);
+    if (li) {
+      li.classList.add('selected');
+      if (o.scroll) li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    renderMap(false);
+    if (o.pan) TP.map.panToItem(id, !!o.popup);
+  }
+
+  function setMode(itemId, mode) {
+    const it = day().items.find((x) => x.id === itemId);
+    if (!it) return;
+    it.modeIn = mode;
+    it.transitIdx = null;
+    S.save();
+    renderAll();
+  }
+
+  function setTransitIdx(itemId, idx) {
+    const it = day().items.find((x) => x.id === itemId);
+    if (!it) return;
+    it.transitIdx = Number.isInteger(idx) && idx >= 0 ? idx : null;
+    S.save();
+    renderAll();
+  }
+
+  function addPlace(p) {
+    const d = day();
+    const it = S.newItem({ name: String(p.name || '새 장소').slice(0, 100), lat: p.lat, lon: p.lon, category: p.category && p.category !== 'etc' ? p.category : 'sight' });
+    d.items.push(it);
+    selectedId = it.id;
+    S.save();
+    hideResults();
+    $('#searchInput').value = '';
+    renderAll({ fit: true });
+    selectItem(it.id, { scroll: true });
+    toast(`"${it.name}" 을(를) ${S.state.dayIndex + 1}일차에 추가했어요`);
+  }
+
+  function deleteItem(id) {
+    const d = day();
+    const it = d.items.find((x) => x.id === id);
+    if (!it || !confirm(`"${it.name}" 일정을 삭제할까요?`)) return;
+    d.items = d.items.filter((x) => x.id !== id);
+    if (selectedId === id) selectedId = null;
+    S.save();
+    renderAll({ fit: true });
+  }
+
+  function addDay() {
+    const t = trip();
+    if (t.days.length >= 30) return;
+    t.days.push(S.newDay());
+    S.state.dayIndex = t.days.length - 1;
+    selectedId = null;
+    S.save();
+    renderAll({ fit: true });
+  }
+
+  function deleteDay() {
+    const t = trip();
+    if (t.days.length <= 1) return;
+    const d = day();
+    if (!confirm(`${S.state.dayIndex + 1}일차${d.items.length ? ` (일정 ${d.items.length}개)` : ''}를 삭제할까요?`)) return;
+    t.days.splice(S.state.dayIndex, 1);
+    S.clampDay();
+    selectedId = null;
+    S.save();
+    renderAll({ fit: true });
+  }
+
+  /** 드래그로 순서 변경. 앞 장소가 바뀐 구간은 이동수단을 자동으로 되돌린다. */
+  function reorder(oldIndex, newIndex) {
+    const items = day().items;
+    const predOf = () => new Map(items.map((it, i) => [it.id, i ? items[i - 1].id : null]));
+    const before = predOf();
+    items.splice(newIndex, 0, items.splice(oldIndex, 1)[0]);
+    const after = predOf();
+    for (const it of items) {
+      if (before.get(it.id) !== after.get(it.id)) {
+        it.modeIn = null;
+        it.transitIdx = null;
+      }
+    }
+    S.save();
+  }
+
+  // ---- 검색 ----
+  let searchTimer = null;
+  let searchAbort = null;
+  let searchSeq = 0;
+
+  const resultsBox = () => $('#searchResults');
+  function hideResults() {
+    resultsBox().hidden = true;
+    resultsBox().replaceChildren();
+  }
+  const showMessage = (text, cls) => {
+    resultsBox().hidden = false;
+    resultsBox().replaceChildren(el('li', { class: 'result-msg ' + (cls || ''), text }));
+  };
+
+  async function runSearch(q) {
+    if (searchAbort) searchAbort.abort();
+    const ctrl = new AbortController();
+    searchAbort = ctrl;
+    const seq = ++searchSeq;
+    showMessage('검색 중…', 'loading');
+    try {
+      const results = await TP.geocode.search(q, ctrl.signal);
+      if (seq !== searchSeq) return;
+      if (!results.length) return showMessage('검색 결과가 없어요. 다른 키워드로 시도해 보세요.');
+      resultsBox().hidden = false;
+      resultsBox().replaceChildren(
+        el('li', { class: 'results-head' }, [
+          el('span', { text: `검색 결과 ${results.length}개` }),
+          el('button', { type: 'button', class: 'icon-btn sm', title: '검색 결과 닫기', 'aria-label': '검색 결과 닫기', onclick: hideResults }, icon('x')),
+        ]),
+        ...results.map((r) =>
+          el('li', { class: 'result' }, [
+            UI.catIcon(r.category),
+            el('button', { type: 'button', class: 'result-main', title: '지도에서 보기', onclick: () => TP.map.showPlace(r, true) }, [
+              el('span', { class: 'result-head' }, [
+                el('span', { class: 'result-name', text: r.name }),
+                el('span', { class: 'result-tag', text: r.source === 'kakao' ? '카카오' : 'OSM' }),
+              ]),
+              el('span', { class: 'result-sub', text: r.displayName }),
+            ]),
+            el('button', { type: 'button', class: 'btn primary small', title: '일정에 추가', onclick: () => addPlace(r) }, [icon('plus'), '추가']),
+          ])
+        )
+      );
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      if (seq !== searchSeq) return;
+      showMessage('검색에 실패했어요. 잠시 후 다시 시도해 주세요.', 'error');
+    }
+  }
+
+  function onSearchInput() {
+    clearTimeout(searchTimer);
+    const q = $('#searchInput').value.trim();
+    if (q.length < 2) {
+      if (searchAbort) searchAbort.abort();
+      searchSeq++;
+      hideResults();
+      return;
+    }
+    searchTimer = setTimeout(() => runSearch(q), TP.geocode.debounceMs()); // 디바운스 (카카오 300ms / Nominatim 700ms)
+  }
+
+  // ---- 다이얼로그 ----
+  function openTripDialog(mode) {
+    tripDialogMode = mode;
+    const t = trip();
+    $('#tripDialogTitle').textContent = mode === 'new' ? '새 여행' : '여행 수정';
+    $('#tripName').value = mode === 'new' ? '새 여행' : t.name;
+    $('#tripStart').value = mode === 'new' ? new Date().toISOString().slice(0, 10) : t.startDate;
+    $('#tripDays').value = mode === 'new' ? 1 : t.days.length;
+    $('#tripDialog').showModal();
+    $('#tripName').select();
+  }
+
+  function submitTrip() {
+    const name = $('#tripName').value.trim() || '이름 없는 여행';
+    const start = $('#tripStart').value;
+    const days = Math.min(30, Math.max(1, Math.round(Number($('#tripDays').value) || 1)));
+    if (tripDialogMode === 'new') {
+      const t = S.newTrip(name, start, days);
+      S.state.trips.push(t);
+      S.state.currentTripId = t.id;
+      S.state.dayIndex = 0;
+    } else {
+      const t = trip();
+      if (days < t.days.length) {
+        const lost = t.days.slice(days).reduce((n, d) => n + d.items.length, 0);
+        if (lost && !confirm(`일수를 줄이면 ${days + 1}일차 이후의 일정 ${lost}개가 삭제됩니다. 계속할까요?`)) return;
+        t.days.length = days;
+      }
+      while (t.days.length < days) t.days.push(S.newDay());
+      t.name = name;
+      t.startDate = start;
+    }
+    selectedId = null;
+    S.save();
+    $('#tripDialog').close();
+    renderAll({ fit: true });
+  }
+
+  function deleteTrip() {
+    const t = trip();
+    if (!confirm(`"${t.name}" 여행을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    S.state.trips = S.state.trips.filter((x) => x.id !== t.id);
+    if (!S.state.trips.length) S.state.trips.push(S.newTrip('새 여행', '', 1));
+    S.state.currentTripId = S.state.trips[0].id;
+    S.state.dayIndex = 0;
+    selectedId = null;
+    S.save();
+    renderAll({ fit: true });
+  }
+
+  function openItemDialog(id) {
+    const it = day().items.find((x) => x.id === id);
+    if (!it) return;
+    editingItemId = id;
+    $('#itemName').value = it.name;
+    $('#itemLat').value = it.lat;
+    $('#itemLon').value = it.lon;
+    $('#itemCat').value = it.category;
+    $('#itemStay').value = it.stay;
+    $('#itemCost').value = it.cost;
+    $('#itemParking').value = it.parking;
+    $('#itemMemo').value = it.memo;
+    $('#itemDay').replaceChildren(...trip().days.map((d, i) => {
+      const date = F.fmtDate(F.dayDate(trip(), i));
+      return el('option', { value: String(i), text: `${i + 1}일차${date ? ' · ' + date : ''}`, selected: i === S.state.dayIndex });
+    }));
+    $('#itemDay').value = String(S.state.dayIndex);
+    $('#itemDialog').showModal();
+  }
+
+  function submitItem() {
+    const it = day().items.find((x) => x.id === editingItemId);
+    if (!it) return $('#itemDialog').close();
+    const nn = (id, def, min, max) => {
+      const v = Number($(id).value);
+      return isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
+    };
+    it.name = $('#itemName').value.trim().slice(0, 100) || '이름 없는 장소';
+    it.lat = nn('#itemLat', it.lat, -90, 90);
+    it.lon = nn('#itemLon', it.lon, -180, 180);
+    it.category = $('#itemCat').value;
+    it.stay = Math.round(nn('#itemStay', 60, 0, 1440));
+    it.cost = Math.round(nn('#itemCost', 0, 0, 1e9));
+    it.parking = Math.round(nn('#itemParking', 0, 0, 1e9));
+    it.memo = $('#itemMemo').value.slice(0, 500);
+    const target = Number($('#itemDay').value);
+    if (target !== S.state.dayIndex && trip().days[target]) {
+      day().items = day().items.filter((x) => x !== it);
+      it.modeIn = null;
+      it.transitIdx = null;
+      trip().days[target].items.push(it);
+      toast(`${target + 1}일차로 이동했어요`);
+    }
+    S.save();
+    $('#itemDialog').close();
+    renderAll({ fit: target !== S.state.dayIndex });
+  }
+
+  // ---- 설정 ----
+  const SETTINGS_SCHEMA = [
+    { group: '여행', fields: [{ path: 'people', label: '여행 인원', unit: '명', min: 1, step: 1, int: true }] },
+    {
+      group: '대중교통 (1인, 교통카드 · 조회 실패 시 추정에만 사용)',
+      fields: [
+        { path: 'transit.baseFare', label: '기본요금', unit: '원', min: 0, step: 50 },
+        { path: 'transit.baseKm', label: '기본요금 적용 거리', unit: 'km', min: 0, step: 1 },
+        { path: 'transit.stepKm', label: '추가요금 단위 거리 (기본~상한)', unit: 'km', min: 0.1, step: 0.5 },
+        { path: 'transit.stepFee', label: '단위당 추가요금', unit: '원', min: 0, step: 50 },
+        { path: 'transit.stepMaxKm', label: '추가요금 구간 상한', unit: 'km', min: 0, step: 1 },
+        { path: 'transit.farStepKm', label: '상한 초과 단위 거리', unit: 'km', min: 0.1, step: 0.5 },
+        { path: 'transit.farStepFee', label: '상한 초과 단위 요금', unit: '원', min: 0, step: 50 },
+      ],
+    },
+    {
+      group: '택시 (서울 중형)',
+      fields: [
+        { path: 'taxi.baseFare', label: '기본요금', unit: '원', min: 0, step: 100 },
+        { path: 'taxi.baseMeters', label: '기본요금 거리', unit: 'm', min: 0, step: 100 },
+        { path: 'taxi.stepMeters', label: '추가요금 단위 거리', unit: 'm', min: 1, step: 1 },
+        { path: 'taxi.stepFee', label: '단위당 추가요금', unit: '원', min: 0, step: 100 },
+        { path: 'taxi.surcharge20', label: '심야할증 (22~23시, 02~04시)', unit: '%', min: 0, step: 5, scale: 100 },
+        { path: 'taxi.surcharge40', label: '심야할증 (23~02시)', unit: '%', min: 0, step: 5, scale: 100 },
+      ],
+    },
+    {
+      group: '자가용 (통행료 미포함)',
+      fields: [
+        { path: 'car.efficiency', label: '연비', unit: 'km/L', min: 0.1, step: 0.5 },
+        { path: 'car.fuelPrice', label: '유가', unit: '원/L', min: 0, step: 10 },
+      ],
+    },
+    {
+      group: '이동 시간 추정',
+      fields: [
+        { path: 'est.autoWalkKm', label: '자동 선택: 도보 기준 거리', unit: 'km', min: 0, step: 0.1 },
+        { path: 'est.transitSpeed', label: '대중교통 평균 속도', unit: 'km/h', min: 1, step: 1 },
+        { path: 'est.transitOverheadMin', label: '대중교통 대기·환승 시간', unit: '분', min: 0, step: 1 },
+        { path: 'est.walk', label: '도보 속도 (조회 실패 시)', unit: 'km/h', min: 0.5, step: 0.5 },
+        { path: 'est.bike', label: '자전거 속도 (조회 실패 시)', unit: 'km/h', min: 1, step: 1 },
+        { path: 'est.car', label: '자동차 속도 (조회 실패 시)', unit: 'km/h', min: 1, step: 1 },
+        { path: 'est.detour', label: '직선거리 → 도로거리 보정 계수', unit: '배', min: 1, step: 0.05 },
+      ],
+    },
+  ];
+
+  const getPath = (obj, path) => path.split('.').reduce((o, k) => o[k], obj);
+  function setPath(obj, path, v) {
+    const ks = path.split('.');
+    const last = ks.pop();
+    ks.reduce((o, k) => o[k], obj)[last] = v;
+  }
+  const round4 = (n) => Math.round(n * 10000) / 10000;
+
+  function buildSettingsFields() {
+    const box = $('#settingsFields');
+    box.replaceChildren(...SETTINGS_SCHEMA.map((g) =>
+      el('fieldset', {}, [
+        el('legend', { text: g.group }),
+        ...g.fields.map((f) =>
+          el('label', { class: 'field-row' }, [
+            el('span', { text: f.label }),
+            el('span', { class: 'field-input' }, [
+              el('input', { type: 'number', name: f.path, min: f.min, step: f.step, required: true, value: String(round4(getPath(settings(), f.path) * (f.scale || 1))) }),
+              el('span', { class: 'unit', text: f.unit }),
+            ]),
+          ])
+        ),
+      ])
+    ));
+  }
+
+  function refreshKakaoStatus() {
+    const box = $('#kakaoKeyStatus');
+    const G = TP.kakao;
+    const show = () => {
+      const st = G.status();
+      box.textContent =
+        st.state === 'ready' ? '현재 카카오 지도/검색 사용 중' :
+        st.state === 'failed' ? `카카오 SDK 로드 실패 - 지도를 표시할 수 없고 OSM 검색을 사용 중 (${st.error})` :
+        st.state === 'loading' ? '카카오 SDK 로드 중…' :
+        '키가 없어 지도를 표시할 수 없고 OSM(Nominatim) 검색을 사용 중';
+    };
+    show();
+    if (G.status().state === 'loading') G.load().then(show);
+  }
+
+  function openSettings() {
+    buildSettingsFields();
+    $('#kakaoKeyInput').value = TP.kakao.getStoredKey();
+    refreshKakaoStatus();
+    $('#settingsDialog').showModal();
+  }
+
+  function submitKakaoKey() {
+    const G = TP.kakao;
+    const v = $('#kakaoKeyInput').value.trim();
+    if (v === G.getStoredKey()) return;
+    if (v && !G.isValidKey(v)) {
+      toast('카카오 키 형식이 올바르지 않아 저장하지 않았어요');
+      return;
+    }
+    G.setStoredKey(v);
+    toast('카카오 키를 저장했어요. 적용하려면 페이지를 새로고침하세요');
+  }
+
+  function submitSettings() {
+    for (const g of SETTINGS_SCHEMA) {
+      for (const f of g.fields) {
+        const input = $(`#settingsFields input[name="${f.path}"]`);
+        let v = Number(input.value);
+        if (!isFinite(v)) continue;
+        v = Math.max(f.min, v) / (f.scale || 1);
+        if (f.int) v = Math.round(v);
+        setPath(settings(), f.path, v);
+      }
+    }
+    S.save();
+    $('#settingsDialog').close();
+    renderAll();
+    toast('설정을 저장했어요');
+    submitKakaoKey(); // 키가 바뀌었으면 위 토스트를 덮어쓰며 새로고침 안내
+  }
+
+  // ---- 테마 표시 (헤더 아이콘 + 메뉴/설정의 선택 상태) ----
+  const THEME_LABEL = { system: '시스템', light: '라이트', dark: '다크' };
+  const THEME_ICON = { system: 'monitor', light: 'sun', dark: 'moon' };
+  function renderThemeUI(pref) {
+    pref = pref || TP.theme.get();
+    $('#themeIcon').setAttribute('href', '#i-' + THEME_ICON[pref]);
+    const label = '테마: ' + THEME_LABEL[pref];
+    $('#themeBtn').title = label;
+    $('#themeBtn').setAttribute('aria-label', label);
+    for (const b of document.querySelectorAll('[data-theme-choice]')) {
+      const on = b.dataset.themeChoice === pref;
+      b.setAttribute('aria-checked', String(on));
+      b.classList.toggle('active', on);
+    }
+  }
+
+  // ---- 내보내기 / 가져오기 ----
+  function exportFile() {
+    const blob = new Blob([S.exportJSON()], { type: 'application/json' });
+    const a = el('a', { href: URL.createObjectURL(blob), download: `trip-planner-${new Date().toISOString().slice(0, 10)}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function importFile(file) {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) return toast('파일이 너무 커요 (5MB 이하)');
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const n = S.importJSON(String(reader.result));
+        selectedId = null;
+        renderAll({ fit: true });
+        toast(`여행 ${n}개를 가져왔어요`);
+      } catch (e) {
+        toast(e.message || '가져오기에 실패했어요');
+      }
+    };
+    reader.onerror = () => toast('파일을 읽을 수 없어요');
+    reader.readAsText(file);
+  }
+
+  // =====================================================================
+  // 로그인 / 회원가입 / 저장 상태
+  // =====================================================================
+  const BANNER_KEY = 'tripplanner.hideGuestBanner';
+  const USER_RE = /^[a-zA-Z0-9_]{3,20}$/;
+  let authMode = 'login';
+
+  function bannerHidden() {
+    try {
+      return localStorage.getItem(BANNER_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function renderAuth() {
+    const u = TP.auth.current();
+    $('#authGuest').hidden = !!u;
+    $('#guestMenuWrap').hidden = !!u;
+    $('#authUser').hidden = !u;
+    $('#userName').textContent = u ? u.username : '';
+    $('#userNameMenu').textContent = u ? u.username : '';
+    $('#userAvatar').textContent = u ? Array.from(u.username)[0].toUpperCase() : '';
+    $('#userBtn').title = u ? '계정: ' + u.username : '계정';
+    $('#userBtn').setAttribute('aria-label', u ? '계정 메뉴 (' + u.username + ')' : '계정 메뉴');
+    if (u && !$('#userMenu').hidden) UI.closeMenus();
+    $('#guestBanner').hidden = !!u || bannerHidden();
+  }
+
+  function renderSaveStatus(st) {
+    const b = $('#saveStatus');
+    b.hidden = st.state === 'idle' || !TP.auth.current();
+    b.className = 'save-status ' + st.state;
+    const text = st.state === 'saving' ? '저장 중…' : st.state === 'saved' ? '저장됨' : st.state === 'error' ? '저장 실패 - 다시 시도' : '';
+    b.querySelector('.save-text').textContent = text;
+    b.setAttribute('aria-label', text);
+    b.title = st.state === 'error' ? st.message || text : text;
+    b.disabled = st.state !== 'error';
+  }
+
+  function setAuthMode(mode) {
+    authMode = mode;
+    for (const t of document.querySelectorAll('#authTabs .tab')) {
+      const on = t.dataset.mode === mode;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', String(on));
+    }
+    $('#authTitle').textContent = mode === 'login' ? '로그인' : '회원가입';
+    $('#authPass2Row').hidden = mode === 'login';
+    $('#authHint').hidden = mode === 'login';
+    $('#authPass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+    $('#authSubmit').textContent = mode === 'login' ? '로그인' : '가입하고 시작하기';
+    showAuthError('');
+  }
+
+  function showAuthError(msg) {
+    const p = $('#authError');
+    p.textContent = msg;
+    p.hidden = !msg;
+  }
+
+  function openAuth(mode) {
+    $('#authForm').reset();
+    setAuthMode(mode);
+    $('#authDialog').showModal();
+    $('#authName').focus();
+  }
+
+  function validateAuth(name, pass, pass2) {
+    if (!name) return '아이디를 입력해 주세요.';
+    if (!USER_RE.test(name)) return '아이디는 3~20자의 영문, 숫자, 밑줄(_)만 사용할 수 있어요.';
+    if (!pass) return '비밀번호를 입력해 주세요.';
+    if (authMode === 'signup') {
+      if (pass.length < 8 || pass.length > 72) return '비밀번호는 8~72자로 입력해 주세요.';
+      if (pass !== pass2) return '비밀번호 확인이 일치하지 않아요.';
+    }
+    return '';
+  }
+
+  async function submitAuth() {
+    const name = $('#authName').value.trim();
+    const pass = $('#authPass').value;
+    const err = validateAuth(name, pass, $('#authPass2').value);
+    if (err) return showAuthError(err);
+    showAuthError('');
+    const btn = $('#authSubmit');
+    btn.disabled = true;
+    const signingUp = authMode === 'signup';
+    try {
+      const r = signingUp ? await TP.auth.signup(name, pass) : await TP.auth.login(name, pass);
+      $('#authDialog').close();
+      $('#authForm').reset();
+      toast(signingUp ? `${r.username}님, 가입을 환영해요` : `${r.username}님, 환영해요`);
+    } catch (e) {
+      showAuthError(e.message || '요청에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function bindAuth() {
+    $('#btnLogin').addEventListener('click', () => openAuth('login'));
+    $('#btnSignup').addEventListener('click', () => openAuth('signup'));
+    $('#btnLoginMenu').addEventListener('click', () => openAuth('login'));
+    $('#btnSignupMenu').addEventListener('click', () => openAuth('signup'));
+    $('#btnBannerLogin').addEventListener('click', () => openAuth('login'));
+    $('#btnBannerClose').addEventListener('click', () => {
+      try {
+        localStorage.setItem(BANNER_KEY, '1');
+      } catch (e) {
+        /* 이번 방문에만 숨김 */
+      }
+      $('#guestBanner').hidden = true;
+    });
+    $('#btnLogout').addEventListener('click', async () => {
+      if (await TP.auth.logout()) toast('로그아웃했어요');
+    });
+    for (const t of document.querySelectorAll('#authTabs .tab')) t.addEventListener('click', () => setAuthMode(t.dataset.mode));
+    $('#authForm').addEventListener('submit', (e) => { e.preventDefault(); submitAuth(); });
+    $('#saveStatus').addEventListener('click', () => TP.auth.retry());
+
+    TP.auth.on('status', renderSaveStatus);
+    TP.auth.on('notice', toast);
+    TP.auth.on('change', () => {
+      // 로그인/로그아웃/서버 데이터 로드로 여행 목록이 바뀜
+      selectedId = null;
+      TP.map.clearExtra();
+      renderAuth();
+      renderSaveStatus(TP.auth.status());
+      renderAll({ fit: true });
+    });
+    renderAuth();
+    renderSaveStatus(TP.auth.status());
+  }
+
+  // =====================================================================
+  // 초기화
+  // =====================================================================
+  function bind() {
+    // 헤더 드롭다운 메뉴들 (Esc/바깥 클릭으로 닫힘, 화살표 키 이동)
+    UI.menu($('#tripMenuBtn'), $('#tripMenu'), { align: 'start' });
+    UI.menu($('#tripMoreBtn'), $('#tripMoreMenu'), { align: 'start' });
+    UI.menu($('#themeBtn'), $('#themeMenu'), { align: 'end' });
+    UI.menu($('#guestMenuBtn'), $('#guestMenu'), { align: 'end' });
+    UI.menu($('#userBtn'), $('#userMenu'), { align: 'end' });
+
+    // 테마 (헤더 메뉴와 설정 창의 선택이 같은 값을 공유)
+    for (const b of document.querySelectorAll('[data-theme-choice]')) b.addEventListener('click', () => TP.theme.set(b.dataset.themeChoice));
+    TP.theme.onChange(renderThemeUI);
+    renderThemeUI();
+
+    $('#btnNewTrip').addEventListener('click', () => openTripDialog('new'));
+    $('#btnEditTrip').addEventListener('click', () => openTripDialog('edit'));
+    $('#btnDeleteTrip').addEventListener('click', deleteTrip);
+    $('#btnDeleteDay').addEventListener('click', deleteDay);
+    $('#btnLegsToggle').addEventListener('click', (e) => setAllLegs(e.currentTarget.dataset.action === 'collapse'));
+    $('#btnRetry').addEventListener('click', () => { TP.routing.clearFailures(); renderAll(); });
+
+    $('#startTime').addEventListener('change', (e) => {
+      day().startTime = e.target.value || '09:00';
+      S.save();
+      renderAll();
+    });
+    $('#peopleInput').addEventListener('change', (e) => {
+      settings().people = Math.min(99, Math.max(1, Math.round(Number(e.target.value) || 1)));
+      S.save();
+      renderAll();
+    });
+    $('#showAll').addEventListener('change', (e) => {
+      S.state.showAll = e.target.checked;
+      S.save();
+      renderMap(true);
+    });
+
+    // 검색
+    $('#searchInput').addEventListener('input', onSearchInput);
+    $('#searchInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(searchTimer);
+        const q = e.target.value.trim();
+        if (q.length >= 1) runSearch(q);
+      } else if (e.key === 'Escape') hideResults();
+    });
+    $('#btnSearch').addEventListener('click', () => {
+      clearTimeout(searchTimer);
+      const q = $('#searchInput').value.trim();
+      if (q) runSearch(q);
+    });
+
+    // 다이얼로그
+    for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', () => b.closest('dialog').close());
+    $('#tripForm').addEventListener('submit', (e) => { e.preventDefault(); submitTrip(); });
+    $('#itemForm').addEventListener('submit', (e) => { e.preventDefault(); submitItem(); });
+    $('#settingsForm').addEventListener('submit', (e) => { e.preventDefault(); submitSettings(); });
+    $('#btnSettings').addEventListener('click', openSettings);
+    $('#btnSettingsMenu').addEventListener('click', openSettings);
+    $('#btnResetSettings').addEventListener('click', () => {
+      if (!confirm('모든 설정을 기본값으로 되돌릴까요?')) return;
+      S.resetSettings();
+      buildSettingsFields();
+    });
+
+    $('#btnExport').addEventListener('click', exportFile);
+    $('#btnImport').addEventListener('click', () => $('#fileImport').click());
+    $('#fileImport').addEventListener('change', (e) => {
+      importFile(e.target.files[0]);
+      e.target.value = '';
+    });
+
+    bindAuth();
+
+    $('#itemCat').replaceChildren(...TP.CATEGORIES.map((c) => el('option', { value: c.id, text: c.label })));
+
+    // 스크롤하면 고정된 검색 바 아래에 그림자
+    const panel = $('#panel');
+    panel.addEventListener('scroll', () => $('#searchBar').classList.toggle('scrolled', panel.scrollTop > 4), { passive: true });
+  }
+
+  function initSortable() {
+    if (!window.Sortable) return;
+    Sortable.create($('#itemList'), {
+      handle: '.drag-handle',
+      animation: 150,
+      ghostClass: 'drag-ghost',
+      onStart: () => { dragging = true; },
+      onEnd: (evt) => {
+        dragging = false;
+        pendingRender = false;
+        if (evt.oldIndex !== evt.newIndex && evt.oldIndex != null) reorder(evt.oldIndex, evt.newIndex);
+        renderAll(); // 순서가 바뀌었으니 구간/시간/비용을 다시 계산
+      },
+    });
+  }
+
+  function start() {
+    S.load();
+    TP.auth.restore(); // 마지막 로그인 사용자의 캐시가 있으면 서버 확인 전에 먼저 표시
+    bind();
+    initSortable();
+    TP.map.init('map', {
+      onSelect: (id, dayIndex) => {
+        if (dayIndex !== S.state.dayIndex) {
+          S.state.dayIndex = dayIndex;
+          S.save();
+          renderAll();
+        }
+        selectItem(id, { scroll: true, pan: true, popup: true });
+      },
+      onAddPlace: addPlace,
+    });
+    renderAll({ fit: true });
+    TP.auth.init(); // 서버 세션 확인 + 서버 데이터 불러오기 (게스트면 아무 일도 없음)
+  }
+
+  document.addEventListener('DOMContentLoaded', start);
+})();
