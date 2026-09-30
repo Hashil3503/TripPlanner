@@ -8,8 +8,8 @@
     foot: 'https://routing.openstreetmap.de/routed-foot/route/v1/foot/',
     bike: 'https://routing.openstreetmap.de/routed-bike/route/v1/bike/',
   };
-  const CACHE_KEY = 'tripplanner.routecache.v2'; // v2: 대중교통 실경로 추가 (v1의 도보/자전거/자동차 항목만 이어받는다)
-  const OLD_CACHE_KEY = 'tripplanner.routecache.v1';
+  const CACHE_KEY = 'tripplanner.routecache.v3'; // v3: 대중교통 요금 범위(fareMin/fareMax) 추가 - v1/v2의 대중교통 항목은 범위 정보가 없어 버리고 나머지(도보/자전거/자동차)만 이어받는다
+  const OLD_CACHE_KEYS = ['tripplanner.routecache.v1', 'tripplanner.routecache.v2'];
   const CACHE_MAX = 400;
   const CACHE_BUDGET = 2500000; // localStorage 저장 문자 수 상한 (대중교통 경로점이 커서 오래된 것부터 버린다)
   const FAIL_TTL_MS = 60 * 1000; // 실패한 구간은 1분간 재요청하지 않음
@@ -46,6 +46,13 @@
   const isPt = (p) => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1]);
   const nonNeg = (v) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0);
 
+  /** 요금 범위 검증: 둘 다 0 이상 유한수면 (min <= max로 정렬해) 반올림, 아니면 null */
+  function cleanRange(a, b) {
+    const ok = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
+    if (!ok(a) || !ok(b)) return { fareMin: null, fareMax: null };
+    return { fareMin: Math.round(Math.min(a, b)), fareMax: Math.round(Math.max(a, b)) };
+  }
+
   /** 서버 응답/저장값의 경로 목록을 검증·정리 (잘못된 항목은 버림, 최대 5개) */
   function cleanRoutes(list) {
     const out = [];
@@ -57,6 +64,7 @@
         totalTime: nonNeg(r.totalTime),
         transfers: Math.round(nonNeg(r.transfers)),
         fare: typeof r.fare === 'number' && isFinite(r.fare) && r.fare >= 0 ? Math.round(r.fare) : null,
+        ...cleanRange(r.fareMin, r.fareMax),
         steps: r.steps.filter((s) => s && typeof s === 'object').map((s) => ({
           type: String(s.type || 'UNKNOWN').slice(0, 30),
           guidance: String(s.guidance || '').slice(0, 200),
@@ -110,11 +118,14 @@
   try {
     const readCache = (k) => JSON.parse(localStorage.getItem(k) || '{}');
     let old = {};
-    try {
-      old = readCache(OLD_CACHE_KEY); // v1에는 도보/자전거/자동차 경로만 있다 (대중교통 추정은 저장하지 않았다)
-    } catch (e) {
-      /* ignore */
+    for (const ok of OLD_CACHE_KEYS) {
+      try {
+        old = Object.assign(old, readCache(ok)); // 이전 버전: 대중교통 항목은 건너뛰고 도보/자전거/자동차 경로만 이어받는다
+      } catch (e) {
+        /* ignore */
+      }
     }
+    for (const k of Object.keys(old)) if (k.startsWith('transit|')) delete old[k];
     const saved = Object.assign({}, old, readCache(CACHE_KEY));
     for (const [k, v] of Object.entries(saved)) {
       if (!v || typeof v !== 'object') continue;
@@ -125,7 +136,7 @@
         memory.set(k, { distance: v.d, duration: v.t, geometry: v.g, estimated: false });
       }
     }
-    localStorage.removeItem(OLD_CACHE_KEY);
+    for (const ok of OLD_CACHE_KEYS) localStorage.removeItem(ok);
   } catch (e) {
     /* 캐시 없이 진행 */
   }

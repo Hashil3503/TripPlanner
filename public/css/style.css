@@ -571,6 +571,10 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 .leg-stat.cost { font-weight: 700; color: var(--text); }
 .leg-info .tag { margin-left: 8px; }
 .leg-detail { font-size: 12px; color: var(--muted); }
+.leg-edit-row { display: flex; }
+.leg-edit { font-size: 12px; margin-left: -4px; }
+.leg-edit .icon { width: 13px; height: 13px; }
+.leg-edit.strong { font-weight: 700; font-size: 13px; }
 .leg-transit { display: flex; flex-direction: column; gap: 6px; }
 .leg-route { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
 .route-pills { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -592,6 +596,7 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 .ext-link .icon { width: 13px; height: 13px; }
 .tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); white-space: nowrap; }
 .tag.warn { background: var(--warn-soft); color: var(--warn); }
+.tag.accent { background: var(--accent-soft); color: var(--accent-text); }
 .tag.loading { background: transparent; color: var(--muted); padding-left: 0; }
 .spinner {
   display: inline-block; width: 11px; height: 11px; border: 2px solid var(--border-strong); border-top-color: var(--accent);
@@ -614,6 +619,7 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 .tile.total .tile-value { font-size: 20px; color: var(--accent-text); letter-spacing: -0.01em; }
 .summary-note { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: 12px; color: var(--muted); }
 .summary-note .icon { width: 13px; height: 13px; }
+.summary-note.warn { color: var(--warn); }
 .warn-box { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: 13px; }
 .warn-box .icon { margin-top: 2px; }
 .fine-print { margin: 16px 0 0; line-height: 1.55; }

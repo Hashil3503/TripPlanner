@@ -240,6 +240,9 @@
   const login = (username, password) => authRequest('/api/login', username, password);
   const signup = (username, password) => authRequest('/api/signup', username, password);
 
+  /** 로그인 상태에서 비밀번호 변경 (서버가 다른 기기의 세션을 끊는다) */
+  const changePassword = (currentPassword, newPassword) => api('PUT', '/api/password', { currentPassword, newPassword });
+
   async function logout() {
     if (syncOn) {
       await flush();
@@ -293,5 +296,5 @@
     return run();
   }
 
-  TP.auth = { on, login, signup, logout, restore, init, retry, current: () => user, status: () => status };
+  TP.auth = { on, login, signup, changePassword, logout, restore, init, retry, current: () => user, status: () => status };
 })();

@@ -28,6 +28,7 @@
       else {
         const v = isObj(saved) ? saved[k] : undefined;
         out[k] = typeof v === 'number' && isFinite(v) ? v : base[k];
+        if (k === 'rangePick') out[k] = TP.fare.snapRangePick(out[k]); // 0 / 0.5 / 1만 허용
       }
     }
     return out;
@@ -60,6 +61,8 @@
       parking: Math.round(num(raw.parking, 0, 0, 1e9)), // 자가용 도착 시 주차비(총액)
       modeIn: modes.includes(raw.modeIn) ? raw.modeIn : null, // 이전 장소에서 오는 이동수단 (null = 자동)
       transitIdx: Number.isInteger(raw.transitIdx) && raw.transitIdx >= 0 && raw.transitIdx < 5 ? raw.transitIdx : null, // 대중교통 대안 경로 번호 (null = 가장 빠른 경로)
+      legMin: Number.isInteger(raw.legMin) && raw.legMin >= 0 && raw.legMin <= 4320 ? raw.legMin : null, // 이전 장소에서 오는 이동 시간 직접 입력(분, null = 자동)
+      legCost: Number.isInteger(raw.legCost) && raw.legCost >= 0 && raw.legCost <= 1e8 ? raw.legCost : null, // 이동 요금 직접 입력(원, 대중교통·도보·자전거는 1인, 택시·자가용은 차량 1대 총액, null = 자동)
     };
   }
 
@@ -223,7 +226,7 @@
     return { id: uid(), name, startDate: startDate || '', days };
   }
   const newItem = (p) => Object.assign(
-    { id: uid(), name: '새 장소', lat: 0, lon: 0, category: 'sight', stay: 60, memo: '', cost: 0, parking: 0, modeIn: null, transitIdx: null },
+    { id: uid(), name: '새 장소', lat: 0, lon: 0, category: 'sight', stay: 60, memo: '', cost: 0, parking: 0, modeIn: null, transitIdx: null, legMin: null, legCost: null },
     p
   );
 
@@ -255,5 +258,5 @@
     state.settings = mergeSettings(TP.fare.DEFAULT_CONFIG, null);
   }
 
-  TP.store = { state, hooks, load, useUserCache, clearUserCache, loadFromServer, normServerTrip, isSample, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, exportJSON, importJSON, resetSettings, uid };
+  TP.store = { normItem, state, hooks, load, useUserCache, clearUserCache, loadFromServer, normServerTrip, isSample, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, exportJSON, importJSON, resetSettings, uid };
 })();

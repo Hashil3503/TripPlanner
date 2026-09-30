@@ -205,6 +205,26 @@ function handleLogout(req, res) {
   sendJson(res, 200, { ok: true }, { 'Set-Cookie': auth.clearCookie() });
 }
 
+async function handlePassword(req, res) {
+  const u = requireUser(req);
+  const body = await readJson(req);
+  const cur = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+  const next = body.newPassword;
+  const key = `${clientIp(req)}|${u.username.toLowerCase()}`; // 로그인과 같은 제한기·키를 쓴다
+  if (loginLimiter.blocked(key)) throw new HttpError(429, '시도가 너무 많아요. 15분 뒤에 다시 시도해 주세요');
+  if (typeof next !== 'string' || next.length < auth.PASSWORD_MIN || next.length > auth.PASSWORD_MAX) throw new HttpError(400, `비밀번호는 ${auth.PASSWORD_MIN}~${auth.PASSWORD_MAX}자로 입력해 주세요`);
+  const row = db.findUser(u.username);
+  const ok = row && cur.length <= auth.PASSWORD_MAX * 2 && (await auth.verifyPassword(cur, row.password_hash));
+  if (!ok) {
+    loginLimiter.fail(key);
+    throw new HttpError(401, '현재 비밀번호가 올바르지 않습니다');
+  }
+  loginLimiter.reset(key);
+  db.setPassword(u.id, await auth.hashPassword(next));
+  db.deleteOtherSessions(u.id, auth.sha256(auth.parseCookies(req.headers.cookie)[auth.COOKIE_NAME])); // 다른 기기는 로그아웃
+  sendJson(res, 200, { ok: true });
+}
+
 function handleMe(req, res) {
   const u = requireUser(req);
   sendJson(res, 200, { username: u.username, settings: parseSettings(u.settings_json) });
@@ -310,6 +330,7 @@ async function handleApi(req, res, pathname) {
       case 'signup': allow('POST'); return handleSignup(req, res);
       case 'login': allow('POST'); return handleLogin(req, res);
       case 'logout': allow('POST'); return handleLogout(req, res);
+      case 'password': allow('PUT'); return handlePassword(req, res);
       case 'me': allow('GET'); return handleMe(req, res);
       case 'trips': allow('GET'); return handleListTrips(req, res);
       case 'settings': allow('PUT'); return handlePutSettings(req, res);

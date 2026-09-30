@@ -57,6 +57,9 @@
     let distance = route.distance;
     let real = null; // 카카오 대중교통 실경로
     let fare = null;
+    let fareMin = null;
+    let fareMax = null;
+    let interCity = false; // 대중교통 실경로 없이 도시 간 거리 -> 시간은 자동차 기준, 요금 미정
     if (mode === 'transit') {
       const tr = route.transit;
       if (tr && tr.routes.length) {
@@ -64,17 +67,26 @@
         const saved = Number.isInteger(item.transitIdx) && item.transitIdx >= 0 && item.transitIdx < n ? item.transitIdx : null;
         const idx = saved != null ? saved : tr.defaultIdx;
         const chosen = tr.routes[idx];
-        real = { routes: tr.routes, idx, defaultIdx: tr.defaultIdx, route: chosen, landingURL: tr.landingURL, fareKnown: chosen.fare != null };
+        const range = chosen.fare == null && TP.fare.rangeFare(chosen.fareMin, chosen.fareMax) != null ? { min: chosen.fareMin, max: chosen.fareMax } : null;
+        real = { routes: tr.routes, idx, defaultIdx: tr.defaultIdx, route: chosen, landingURL: tr.landingURL, fareKnown: chosen.fare != null, fareRange: range };
         seconds = chosen.totalTime;
         distance = chosen.totalDistance;
         fare = chosen.fare;
+        if (real.fareRange) { fareMin = real.fareRange.min; fareMax = real.fareRange.max; }
       } else {
         // 실경로를 못 받으면(경로 없음/키 없음/오류) 자동차 도로거리로 추정
-        seconds = (route.distance / 1000 / settings.est.transitSpeed) * 3600 + settings.est.transitOverheadMin * 60;
+        interCity = !loading && route.distance / 1000 > settings.est.interCityKm;
+        // 도시 간 거리는 시내 평균 속도 공식이 맞지 않아 자동차 소요시간을 쓰고, 요금은 미정으로 둔다
+        seconds = interCity ? route.duration : (route.distance / 1000 / settings.est.transitSpeed) * 3600 + settings.est.transitOverheadMin * 60;
       }
     }
-    const durationMin = Math.ceil(seconds / 60 - 1e-9);
-    const cost = TP.fare.legCost({ mode, distanceM: distance, depMin, parking: item.parking, fare }, settings);
+    // 사용자 직접 입력(구간의 도착 장소에 저장): 시간·요금 각각 있으면 자동 계산 대신 사용
+    const ovMin = Number.isInteger(item.legMin) && item.legMin >= 0;
+    const ovCost = Number.isInteger(item.legCost) && item.legCost >= 0;
+    const durationMin = ovMin ? item.legMin : Math.ceil(seconds / 60 - 1e-9);
+    // 실경로인데 카카오가 요금을 아예 안 준 경우(예: 심야 공항버스+지하철)도 거리 기반 시내 요금으로 추정하지 않고 미정으로 둔다
+    const noFare = Boolean(real && !real.fareKnown && !real.fareRange);
+    const cost = TP.fare.legCost({ mode, distanceM: distance, depMin, parking: item.parking, fare, fareMin, fareMax, override: ovCost ? item.legCost : null, unknown: (interCity || noFare) && !ovCost }, settings);
     return {
       from: prev,
       to: item,
@@ -84,11 +96,14 @@
       distance,
       durationMin,
       depMin,
-      cost,
+      cost, // cost.unknown: 요금 미정 (도시 간 이동 또는 카카오 요금 없음, 합계 제외)
+      interCity, // 대중교통 조회 실패 + 도로거리 > est.interCityKm
+      noFare, // 대중교통 실경로이지만 카카오가 요금을 주지 않음
+      override: { min: ovMin, cost: ovCost }, // 사용자 직접 입력 여부
       geometry: route.geometry,
       estimated: route.estimated, // 경로 조회 실패 -> 직선거리 기반 추정
       transit: mode === 'transit' && !real, // 대중교통 추정값 (실경로를 못 받은 경우)
-      transitReal: real, // 대중교통 실경로: { routes, idx, defaultIdx, route, landingURL, fareKnown }
+      transitReal: real, // 대중교통 실경로: { routes, idx, defaultIdx, route, landingURL, fareKnown, fareRange }
       fallbackReason: route.fallbackReason || '', // 대중교통 추정으로 대체된 이유
       loading,
     };
@@ -119,7 +134,7 @@
     const stats = {
       travelMin: 0, distance: 0, transport: 0, extra: 0, total: 0,
       byMode: { walk: 0, bike: 0, transit: 0, taxi: 0, car: 0 },
-      legCount: 0, failedLegs: 0, loadingLegs: 0, end: clock, late: false,
+      legCount: 0, failedLegs: 0, unknownCostLegs: 0, loadingLegs: 0, end: clock, late: false,
     };
     const people = Math.max(1, Math.round(settings.people || 1));
 
@@ -133,6 +148,7 @@
         stats.transport += leg.cost.total;
         stats.byMode[leg.mode] += leg.cost.total;
         stats.legCount++;
+        if (leg.cost.unknown) stats.unknownCostLegs++;
         if (leg.loading) stats.loadingLegs++;
         else if (leg.estimated) stats.failedLegs++;
       }
@@ -155,7 +171,7 @@
     const totals = {
       travelMin: 0, distance: 0, transport: 0, extra: 0, total: 0, people,
       byMode: { walk: 0, bike: 0, transit: 0, taxi: 0, car: 0 },
-      failedLegs: 0, loadingLegs: 0, items: 0,
+      failedLegs: 0, loadingLegs: 0, unknownCostLegs: 0, items: 0,
     };
     for (const d of days) {
       const s = d.stats;
@@ -165,6 +181,7 @@
       totals.extra += s.extra;
       totals.total += s.total;
       totals.failedLegs += s.failedLegs;
+      totals.unknownCostLegs += s.unknownCostLegs;
       totals.loadingLegs += s.loadingLegs;
       totals.items += d.rows.length;
       for (const m of MODE_IDS) totals.byMode[m] += s.byMode[m];

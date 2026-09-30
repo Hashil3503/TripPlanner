@@ -35,6 +35,7 @@
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
       <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
       <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m16 7 3 3"/></symbol>
       <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
       <symbol id="i-login" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/></symbol>
       <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
@@ -141,6 +142,7 @@
           <div class="menu" id="userMenu" role="menu" aria-label="계정" hidden>
             <div class="menu-head"><span class="muted">로그인한 계정</span><strong id="userNameMenu"></strong></div>
             <div class="menu-sep" role="separator"></div>
+            <button class="menu-item" id="btnPassword" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>비밀번호 변경</button>
             <button class="menu-item" id="btnLogout" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg>로그아웃</button>
           </div>
         </div>
@@ -234,6 +236,27 @@
     </form>
   </dialog>
 
+  <!-- 이동 구간 시간·요금 직접 입력 -->
+  <dialog id="legDialog" aria-labelledby="legDialogTitle">
+    <form id="legForm" method="dialog" class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="legDialogTitle">이동 시간·요금 직접 입력</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <p class="hint" id="legDialogSub"></p>
+        <label>소요 시간 (분)<input id="legMin" type="number" min="0" max="4320" step="5" inputmode="numeric"></label>
+        <label><span id="legCostLabel">요금 (원)</span><input id="legCost" type="number" min="0" max="100000000" step="100" inputmode="numeric"></label>
+        <p class="hint" id="legCostHelp"></p>
+        <p class="hint">비워 두면 자동 계산값을 써요. 이동수단을 바꾸거나 순서를 바꾸면 직접 입력한 값은 지워져요.</p>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" id="btnLegClear">지우기 (자동 계산으로)</button>
+        <button class="btn primary" type="submit">저장</button>
+      </footer>
+    </form>
+  </dialog>
+
   <!-- 일정 항목 편집 -->
   <dialog id="itemDialog" aria-labelledby="itemDialogTitle">
     <form id="itemForm" method="dialog" class="dialog-form">
@@ -321,6 +344,27 @@
       <footer class="dlg-foot">
         <button class="btn" type="button" data-close>취소</button>
         <button class="btn primary" type="submit" id="authSubmit">로그인</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 비밀번호 변경 -->
+  <dialog id="pwDialog" aria-labelledby="pwTitle">
+    <form id="pwForm" method="dialog" class="dialog-form" novalidate>
+      <header class="dlg-head">
+        <h2 id="pwTitle">비밀번호 변경</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <label>현재 비밀번호<input id="pwCur" type="password" name="currentPassword" maxlength="72" autocomplete="current-password"></label>
+        <label>새 비밀번호<input id="pwNew" type="password" name="newPassword" maxlength="72" autocomplete="new-password"></label>
+        <label>새 비밀번호 확인<input id="pwNew2" type="password" name="newPassword2" maxlength="72" autocomplete="new-password"></label>
+        <p class="hint">비밀번호는 8~72자예요. 변경하면 다른 기기에서는 로그아웃돼요.</p>
+        <p class="form-error" id="pwError" role="alert" hidden></p>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit" id="pwSubmit">변경하기</button>
       </footer>
     </form>
   </dialog>
