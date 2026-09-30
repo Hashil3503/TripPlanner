@@ -4,6 +4,7 @@
   const TP = (window.TP = window.TP || {});
 
   const KEY = 'tripplanner.state.v1'; // 게스트(비로그인) 데이터
+  const CLEANUP_KEY = 'tripplanner.cleanup.autoTrip'; // 예전 자동 생성 샘플 정리를 마쳤는지
   const userKey = (name) => `tripplanner.state.v1.user.${String(name).toLowerCase()}`; // 로그인 사용자별 캐시(서버가 원본)
 
   const CATEGORIES = [
@@ -119,6 +120,21 @@
     }
   }
 
+  function readFlag(key) {
+    try {
+      return localStorage.getItem(key) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+  function writeFlag(key) {
+    try {
+      localStorage.setItem(key, '1');
+    } catch (e) {
+      /* 다음 방문에 다시 확인 */
+    }
+  }
+
   function resetState() {
     state.trips = [];
     state.currentTripId = null;
@@ -127,39 +143,46 @@
     state.settings = mergeSettings(TP.fare.DEFAULT_CONFIG, null);
   }
 
-  // 저장된 값을 state에 적용. 여행이 하나도 없으면 false
+  // 저장된 값을 state에 적용. 저장된 객체가 아니면 false (여행이 0개인 빈 목록은 유효한 저장 상태)
   function applySaved(saved) {
-    if (!(isObj(saved) && Array.isArray(saved.trips) && saved.trips.length)) return false;
+    if (!(isObj(saved) && Array.isArray(saved.trips))) return false;
     state.trips = saved.trips.map((t) => {
       const n = normTrip(t);
       if (isObj(t) && typeof t.id === 'string') n.id = t.id;
       return n;
     });
-    state.currentTripId = state.trips.some((t) => t.id === saved.currentTripId) ? saved.currentTripId : state.trips[0].id;
+    state.currentTripId = state.trips.some((t) => t.id === saved.currentTripId) ? saved.currentTripId : state.trips.length ? state.trips[0].id : null;
     state.dayIndex = Math.max(0, Math.round(Number(saved.dayIndex) || 0));
     state.showAll = !!saved.showAll;
     state.settings = mergeSettings(TP.fare.DEFAULT_CONFIG, saved.settings);
     return true;
   }
 
-  /** 게스트 데이터 불러오기 (없으면 샘플 여행) */
+  /** 게스트 데이터 불러오기. 여행이 없으면 빈 목록(자동으로 만들지 않는다). 예전 버전이 남긴 빈 '새 여행'은 정리한다. */
   function load() {
     storageKey = KEY;
     resetState();
-    if (!applySaved(readSaved(KEY))) {
-      // 첫 실행: 샘플 여행
-      const sample = TP.sample.create();
-      state.trips = [sample];
-      state.currentTripId = sample.id;
-      saveNow();
+    applySaved(readSaved(KEY));
+    // 예전에는 첫 실행에 샘플 여행을 자동으로 만들었다. 그 손대지 않은 샘플은 한 번만 정리해서, 이후 직접 만든 샘플은 남긴다.
+    const dropSample = !readFlag(CLEANUP_KEY);
+    const kept = state.trips.filter((t) => !isPlaceholder(t) && !(dropSample && isSample(t)));
+    const changed = kept.length !== state.trips.length;
+    if (changed) {
+      state.trips = kept;
+      if (!kept.some((t) => t.id === state.currentTripId)) {
+        state.currentTripId = kept.length ? kept[0].id : null;
+        state.dayIndex = 0;
+      }
     }
+    if (dropSample) writeFlag(CLEANUP_KEY);
+    if (changed) saveNow();
     clampDay();
   }
 
-  /** 로그인 사용자의 localStorage 캐시로 전환한다. 캐시가 없으면 false(상태 변경 없음). */
+  /** 로그인 사용자의 localStorage 캐시로 전환한다. 캐시가 없으면 false(상태 변경 없음). 여행 0개인 캐시도 유효. */
   function useUserCache(username) {
     const saved = readSaved(userKey(username));
-    if (!(isObj(saved) && Array.isArray(saved.trips) && saved.trips.length)) return false;
+    if (!(isObj(saved) && Array.isArray(saved.trips))) return false;
     storageKey = userKey(username);
     resetState();
     applySaved(saved);
@@ -184,9 +207,8 @@
     const prev = readSaved(userKey(username));
     storageKey = userKey(username);
     resetState();
-    const list = trips.length ? trips : [newTrip('새 여행', '', 1)];
     applySaved({
-      trips: list,
+      trips,
       currentTripId: isObj(prev) ? prev.currentTripId : null,
       dayIndex: isObj(prev) ? prev.dayIndex : 0,
       showAll: isObj(prev) ? prev.showAll : false,
@@ -202,6 +224,41 @@
   }
   const isSample = (t) => tripSig(t) === tripSig(TP.sample.create());
 
+  /** 예전 버전이 자동으로 만든 빈 자리표시 여행 (이름 '새 여행', 날짜 없음, 1일차, 일정 0개). 서버에서 받은 원본 객체에도 쓴다. */
+  function isPlaceholder(t) {
+    if (!isObj(t) || t.name !== '새 여행' || t.startDate) return false;
+    const days = Array.isArray(t.days) ? t.days : [];
+    return days.length <= 1 && days.every((d) => isObj(d) && (!Array.isArray(d.items) || d.items.length === 0));
+  }
+
+  // ---- 날짜 계산 (YYYY-MM-DD 문자열을 UTC 자정으로 다뤄 시간대/서머타임에 따른 하루 어긋남을 피한다) ----
+  const MAX_DAYS = 30;
+  const DAY_MS = 86400000;
+  function ymdToMs(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(typeof s === 'string' ? s : '');
+    if (!m || +m[1] < 1000) return NaN;
+    const ms = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    const d = new Date(ms);
+    return d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? ms : NaN; // 2월 30일 같은 날짜는 거른다
+  }
+  /** 이 기기 시간대 기준 오늘 (toISOString은 UTC라 한국 새벽에는 어제가 된다) */
+  function todayYmd() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  /** 'YYYY-MM-DD'에 n일을 더한 날짜. 잘못된 입력이면 '' */
+  function addDays(s, n) {
+    const ms = ymdToMs(s);
+    return isNaN(ms) ? '' : new Date(ms + n * DAY_MS).toISOString().slice(0, 10);
+  }
+  /** 시작일~종료일(포함)의 일수. 날짜가 올바르지 않으면 NaN, 종료가 시작보다 앞이면 0 이하 */
+  function daySpan(start, end) {
+    const a = ymdToMs(start);
+    const b = ymdToMs(end);
+    return isNaN(a) || isNaN(b) ? NaN : Math.round((b - a) / DAY_MS) + 1;
+  }
+
   /** 서버에서 받은 여행 객체를 앱 형식으로 정규화 (id 유지) */
   function normServerTrip(raw, id) {
     const n = normTrip(raw);
@@ -209,14 +266,15 @@
     return n;
   }
 
-  const currentTrip = () => state.trips.find((t) => t.id === state.currentTripId) || state.trips[0];
+  /** 현재 여행. 여행이 하나도 없으면 null (홈 화면) */
+  const currentTrip = () => state.trips.find((t) => t.id === state.currentTripId) || state.trips[0] || null;
   function clampDay() {
     const t = currentTrip();
     if (t) state.dayIndex = Math.min(Math.max(0, state.dayIndex), t.days.length - 1);
   }
   const currentDay = () => {
     const t = currentTrip();
-    return t.days[Math.min(state.dayIndex, t.days.length - 1)];
+    return t && t.days[Math.min(state.dayIndex, t.days.length - 1)];
   };
 
   const newDay = () => ({ id: uid(), startTime: '09:00', items: [] });
@@ -258,5 +316,5 @@
     state.settings = mergeSettings(TP.fare.DEFAULT_CONFIG, null);
   }
 
-  TP.store = { normItem, state, hooks, load, useUserCache, clearUserCache, loadFromServer, normServerTrip, isSample, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, exportJSON, importJSON, resetSettings, uid };
+  TP.store = { normItem, state, hooks, load, useUserCache, clearUserCache, loadFromServer, normServerTrip, isSample, isPlaceholder, MAX_DAYS, todayYmd, addDays, daySpan, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, exportJSON, importJSON, resetSettings, uid };
 })();

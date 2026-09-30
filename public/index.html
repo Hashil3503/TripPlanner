@@ -168,6 +168,24 @@
         <ul id="searchResults" class="search-results" hidden></ul>
       </section>
 
+      <!-- 여행이 하나도 없을 때의 홈 화면 (이 화면에서는 패널의 다른 구역을 숨긴다) -->
+      <section class="home" id="homeView" aria-labelledby="homeTitle" hidden>
+        <span class="home-mark" aria-hidden="true"><svg class="icon"><use href="#i-compass"/></svg></span>
+        <h2 id="homeTitle">여행 일정을 만들어 볼까요?</h2>
+        <p class="home-lead">지도에서 장소를 고르고 일정을 짜면 이동 시간·교통비를 자동으로 계산해요.</p>
+        <div class="home-actions">
+          <button class="btn primary" id="btnHomeNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>새 여행 만들기</button>
+          <button class="btn" id="btnHomeSample" type="button"><svg class="icon" aria-hidden="true"><use href="#i-map-pin"/></svg>샘플 여행 둘러보기</button>
+          <button class="btn ghost" id="btnHomeImport" type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>JSON 파일 가져오기</button>
+        </div>
+        <ol class="home-steps">
+          <li><span class="home-step-num" aria-hidden="true">1</span>여행 이름과 날짜를 정해요</li>
+          <li><span class="home-step-num" aria-hidden="true">2</span>장소를 검색하거나 지도를 눌러 일정에 담아요</li>
+          <li><span class="home-step-num" aria-hidden="true">3</span>이동수단별 시간과 비용을 한눈에 확인해요</li>
+        </ol>
+        <p class="home-note" id="homeGuestNote" hidden>로그인하면 만든 여행이 계정에 저장돼요. <button class="link" id="btnHomeLogin" type="button">로그인</button></p>
+      </section>
+
       <nav class="day-tabs" id="dayTabs" role="tablist" aria-label="일차 선택"></nav>
 
       <section class="day-toolbar" aria-label="일차 설정">
@@ -219,15 +237,19 @@
 
   <!-- 여행 생성/수정 -->
   <dialog id="tripDialog" aria-labelledby="tripDialogTitle">
-    <form id="tripForm" method="dialog" class="dialog-form">
+    <form id="tripForm" method="dialog" class="dialog-form" novalidate>
       <header class="dlg-head">
         <h2 id="tripDialogTitle">새 여행</h2>
         <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
       </header>
       <div class="dlg-body">
         <label>여행 이름<input id="tripName" type="text" maxlength="80" required></label>
-        <label>출발 날짜<input id="tripStart" type="date"></label>
-        <label>일수 (1~30)<input id="tripDays" type="number" min="1" max="30" step="1" value="1" required></label>
+        <div class="grid2 dates">
+          <label>시작일<input id="tripStart" type="date" required></label>
+          <label>종료일<input id="tripEnd" type="date" required></label>
+        </div>
+        <p class="hint" id="tripSpan">여행 기간은 최대 30일까지 정할 수 있어요.</p>
+        <p class="form-error" id="tripError" role="alert" hidden></p>
       </div>
       <footer class="dlg-foot">
         <button class="btn" type="button" data-close>취소</button>

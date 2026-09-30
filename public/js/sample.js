@@ -1,4 +1,4 @@
-/* sample.js - 첫 실행 시 불러오는 샘플 여행 (서울 1박 2일). 좌표는 대략적인 위치. */
+/* sample.js - 홈 화면의 '샘플 여행 둘러보기'로 만드는 샘플 여행 (서울 1박 2일). 좌표는 대략적인 위치. */
 (function () {
   'use strict';
   const TP = (window.TP = window.TP || {});
