@@ -4,7 +4,9 @@
   "description": "지도를 보며 동선을 짜고 이동 시간/교통비를 계산하는 여행 플래너 (로컬 서버 + 계정 저장, 외부 의존성 없음)",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "reset-password": "node scripts/reset-password.js"
   },
   "engines": {
     "node": ">=22.13"

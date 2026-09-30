@@ -160,7 +160,7 @@
     title.append(ico, h('strong', null, mode.label));
     box.append(title);
     if (leg.transitReal) box.append(TP.ui.routePills(leg.transitReal.route));
-    const sub = `${TP.fmt.fmtDuration(leg.durationMin)} · ${TP.fmt.fmtDist(leg.distance)} · ${TP.fmt.fmtWon(leg.cost.total)}`;
+    const sub = `${TP.fmt.fmtDuration(leg.durationMin)} · ${TP.fmt.fmtDist(leg.distance)} · ${leg.cost.unknown ? '요금 미정' : TP.fmt.fmtWon(leg.cost.total)}`;
     box.append(h('div', 'popup-sub num', sub));
     return box;
   }

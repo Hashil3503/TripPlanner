@@ -250,8 +250,14 @@
     nb.setAttribute('aria-label', nb.getAttribute('aria-label').replace(/(펼치기|접기)$/, verb));
   }
 
+  /** 카카오 요금 범위 표시: '2,350~3,300원' */
+  const rangeText = (min, max) => `${Math.round(min).toLocaleString('ko-KR')}~${won(max)}`;
+  const RANGE_PICK_LABEL = { 0: '최소값', 0.5: '중간값', 1: '최대값' };
+  const rangePickLabel = () => RANGE_PICK_LABEL[TP.fare.snapRangePick(settings().transit.rangePick)];
+
   function legCostText(leg) {
     const c = leg.cost;
+    if (c.unknown) return '요금 미정';
     const people = settings().people;
     const share = people > 1 ? ` (1인 ${won(c.perPerson)})` : '';
     switch (leg.mode) {
@@ -259,7 +265,7 @@
       case 'bike':
         return '0원';
       case 'transit':
-        return `${won(c.total)}${share}`;
+        return `${won(c.total)}${share}` + (leg.transitReal && leg.transitReal.fareRange ? ` · 요금 ${rangeText(leg.transitReal.fareRange.min, leg.transitReal.fareRange.max)}` : '');
       case 'taxi':
         return `${won(c.total)}${share}`;
       case 'car':
@@ -276,7 +282,17 @@
   };
 
   /** 접힌 행의 짧은 비용 (걷기/자전거는 0원) */
-  const legCostShort = (leg) => (leg.mode === 'walk' || leg.mode === 'bike' ? '0원' : won(leg.cost.total));
+  /** 접힌 행 비용: 요금 범위 경로는 합계 기준값 대신 범위(인원 합)를 보여준다 */
+  function legCostShort(leg) {
+    if (leg.cost.unknown) return '요금 미정';
+    if (leg.mode === 'walk' || leg.mode === 'bike') return '0원';
+    const fr = leg.transitReal && leg.transitReal.fareRange;
+    if (fr && !leg.override.cost) {
+      const people = Math.max(1, Math.round(settings().people || 1));
+      return rangeText(fr.min * people, fr.max * people);
+    }
+    return won(leg.cost.total);
+  }
 
   /** 구간 DOM의 접힘 상태를 맞춘다: 안 보이는 쪽은 inert로 포커스/스크린리더에서 제외 */
   function applyLegDom(legEl, collapsed) {
@@ -322,6 +338,9 @@
   }
 
   /** 장소 사이의 이동 구간: 타임라인 위의 가벼운 연결 행. 접으면 한 줄(이동수단·시간·비용)만 남는다. */
+  const INTERCITY_HINT = '카카오 대중교통은 도시 간 경로(KTX·고속버스 등)를 알려주지 않아요. 시간·요금을 직접 입력해 주세요';
+  const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요';
+
   function buildLeg(leg, item) {
     const modes = MODES.map((m) => {
       const on = m.id === leg.mode;
@@ -344,11 +363,22 @@
     }
     if (leg.transit) {
       tags.push(el('span', { class: 'tag', title: leg.fallbackReason || '', text: '대중교통 추정' }));
-      notes.push('대중교통 추정');
+      if (!(leg.override.min && leg.override.cost)) notes.push('대중교통 추정'); // 시간·요금을 모두 직접 입력했으면 접힌 행 경고는 생략
     }
-    if (leg.transitReal && !leg.transitReal.fareKnown) {
-      tags.push(el('span', { class: 'tag warn', title: '카카오가 요금을 하나로 알려주지 않아 거리 기준 요금으로 추정했어요', text: '요금 추정' }));
-      notes.push('요금 추정');
+    if (leg.cost.unknown) {
+      const t = leg.interCity ? '도시 간 · 요금 미정' : '요금 미정';
+      tags.push(el('span', { class: 'tag warn', title: leg.interCity ? INTERCITY_HINT : NOFARE_HINT, text: t }));
+      notes.push(t);
+    }
+    if (leg.override.min || leg.override.cost) {
+      const what = leg.override.min && leg.override.cost ? '시간·요금' : leg.override.min ? '시간' : '요금';
+      tags.push(el('span', { class: 'tag accent', title: `${what}을 직접 입력한 값이에요`, text: '직접 입력' }));
+      notes.push(`${what} 직접 입력`);
+    }
+    if (leg.transitReal && leg.transitReal.fareRange) {
+      const fr = leg.transitReal.fareRange;
+      tags.push(el('span', { class: 'tag', title: `카카오가 요금을 ${rangeText(fr.min, fr.max)} 범위로 알려줘 합계에는 ${rangePickLabel()}을 반영했어요`, text: '요금 범위' }));
+      notes.push(`요금 범위(${rangePickLabel()} 반영)`);
     }
     if (leg.cost.surchargeRate > 0) {
       const t = `심야할증 +${Math.round(leg.cost.surchargeRate * 100)}%`;
@@ -357,7 +387,9 @@
     }
 
     const details = [];
-    if (leg.mode === 'car') {
+    if (leg.override.cost) {
+      details.push(leg.mode === 'taxi' || leg.mode === 'car' ? '직접 입력한 요금은 차량 1대 총액으로 봐요' : '직접 입력한 요금은 1인 기준이에요');
+    } else if (leg.mode === 'car') {
       details.push(`연료비 ${won(leg.cost.fuel)}` + (leg.cost.parking ? ` + 주차 ${won(leg.cost.parking)}` : '') + ' · 통행료 미포함');
     } else if (leg.mode === 'taxi' && settings().people > 1) {
       details.push('택시 요금은 인원이 나눠 낸다고 가정');
@@ -415,6 +447,11 @@
           ]),
           leg.transitReal ? buildTransitRoute(leg.transitReal, item) : null,
           details.length ? el('div', { class: 'leg-detail', text: details.join(' · ') }) : null,
+          el('div', { class: 'leg-edit-row' }, el('button', {
+            type: 'button',
+            class: 'link leg-edit' + (leg.cost.unknown ? ' strong' : ''),
+            onclick: () => openLegDialog(item.id),
+          }, [icon('pencil'), leg.override.min || leg.override.cost ? '직접 입력 수정' : leg.cost.unknown ? '직접 입력' : '시간·요금 직접 입력'])),
         ]))),
     ]);
     applyLegDom(legEl, isLegCollapsed(item.id));
@@ -425,7 +462,7 @@
   function buildTransitRoute(tr, item) {
     const r = tr.route;
     const label = (x, i) => {
-      const fare = x.fare != null ? won(x.fare) : '요금 미상';
+      const fare = x.fare != null ? won(x.fare) : x.fareMin != null && x.fareMax != null ? rangeText(x.fareMin, x.fareMax) : '요금 미상';
       return `${P.routeTypeLabel(x)} ${F.fmtDuration(Math.ceil(x.totalTime / 60 - 1e-9))} ${fare}` + (x.transfers > 0 ? ` · 환승 ${x.transfers}회` : '') + (i === tr.defaultIdx ? ' (최단)' : '');
     };
     const row = [];
@@ -456,6 +493,8 @@
     { id: 'extra', label: '입장·기타', ico: 'ticket' },
   ];
 
+  const unknownNote = (n) => `요금 미정 구간 ${n}개 제외`;
+
   function renderSummary() {
     const idx = S.state.dayIndex;
     const dm = model.days[idx];
@@ -474,6 +513,7 @@
       ]),
     ];
     if (dm.rows.length) dayKids.push(el('p', { class: 'summary-note' }, [icon('clock'), `일정 종료 예정 ${F.fmtTime(s.end)}`]));
+    if (s.unknownCostLegs) dayKids.push(el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(s.unknownCostLegs)} · 이동 구간의 직접 입력으로 채울 수 있어요`]));
     if (s.late) dayKids.push(el('p', { class: 'warn-box' }, [icon('alert'), el('span', { text: `이 날의 일정이 자정을 넘깁니다 (종료 ${F.fmtTime(s.end)}). 체류 시간이나 순서를 조정해 보세요.` })]));
     dayBox.replaceChildren(...dayKids);
 
@@ -501,7 +541,7 @@
         el('span', { class: 'dot', style: `background:${colorOf(i)}` }),
         el('span', { class: 'day-row-name', text: `${i + 1}일차` }),
         el('strong', { class: 'day-row-total', text: won(d.stats.total) }),
-        el('span', { class: 'day-row-sub', text: `${d.rows.length}곳 · ${F.fmtDuration(d.stats.travelMin)} · ${F.fmtDist(d.stats.distance)}` }),
+        el('span', { class: 'day-row-sub', text: `${d.rows.length}곳 · ${F.fmtDuration(d.stats.travelMin)} · ${F.fmtDist(d.stats.distance)}` + (d.stats.unknownCostLegs ? ` · ${unknownNote(d.stats.unknownCostLegs)}` : '') }),
       ])
     );
 
@@ -518,7 +558,8 @@
       bars.length ? el('div', { class: 'bars' }, bars) : el('p', { class: 'muted small', text: '아직 계산된 비용이 없어요.' }),
       el('h4', { text: '일차별 합계' }),
       el('div', { class: 'day-rows' }, dayRows),
-      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)이며, 조회가 안 되면 추정값입니다. 택시 요금은 추정치이고 통행료(고속도로)는 포함되지 않습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
+      ...(t.unknownCostLegs ? [el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(t.unknownCostLegs)} (도시 간 이동은 요금을 직접 입력해 주세요)`])] : []),
+      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)이며, 조회가 안 되면 추정값입니다(도시 간 이동은 요금 미정으로 두고 합계에서 제외해요). 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 추정치이고 통행료(고속도로)는 포함되지 않습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
     );
   }
 
@@ -599,8 +640,16 @@
     if (!it) return;
     it.modeIn = mode;
     it.transitIdx = null;
+    clearLegOverride(it); // 요금 의미가 이동수단마다 달라 직접 입력값도 초기화
     S.save();
     renderAll();
+  }
+
+  function clearLegOverride(it) {
+    if (it) {
+      it.legMin = null;
+      it.legCost = null;
+    }
   }
 
   function setTransitIdx(itemId, idx) {
@@ -628,6 +677,7 @@
     const d = day();
     const it = d.items.find((x) => x.id === id);
     if (!it || !confirm(`"${it.name}" 일정을 삭제할까요?`)) return;
+    clearLegOverride(d.items[d.items.indexOf(it) + 1]); // 다음 장소의 앞 장소가 바뀌므로 직접 입력값을 되돌린다
     d.items = d.items.filter((x) => x.id !== id);
     if (selectedId === id) selectedId = null;
     S.save();
@@ -667,6 +717,7 @@
       if (before.get(it.id) !== after.get(it.id)) {
         it.modeIn = null;
         it.transitIdx = null;
+        clearLegOverride(it);
       }
     }
     S.save();
@@ -823,9 +874,11 @@
     it.memo = $('#itemMemo').value.slice(0, 500);
     const target = Number($('#itemDay').value);
     if (target !== S.state.dayIndex && trip().days[target]) {
+      clearLegOverride(day().items[day().items.indexOf(it) + 1]);
       day().items = day().items.filter((x) => x !== it);
       it.modeIn = null;
       it.transitIdx = null;
+      clearLegOverride(it);
       trip().days[target].items.push(it);
       toast(`${target + 1}일차로 이동했어요`);
     }
@@ -834,18 +887,66 @@
     renderAll({ fit: target !== S.state.dayIndex });
   }
 
+  // ---- 구간 시간·요금 직접 입력 ----
+  let editingLegId = null;
+  const LEG_COST_HELP = {
+    transit: ['대중교통 요금 (1인, 원)', '인원 수만큼 곱해서 합계에 반영해요.'],
+    walk: ['요금 (1인, 원)', '인원 수만큼 곱해서 합계에 반영해요.'],
+    bike: ['요금 (1인, 원)', '인원 수만큼 곱해서 합계에 반영해요.'],
+    taxi: ['택시 요금 (차량 1대 총액, 원)', '인원이 나눠 낸다고 보고 총액 그대로 합계에 반영해요.'],
+    car: ['자가용 비용 (차량 1대 총액, 원)', '연료비·주차비를 대신하는 총액이에요. 통행료가 있다면 함께 넣어 주세요.'],
+  };
+
+  function openLegDialog(itemId) {
+    const d = day();
+    const i = d.items.findIndex((x) => x.id === itemId);
+    if (i < 1) return;
+    const it = d.items[i];
+    const leg = P.computeLeg(d.items[i - 1], { ...it, legMin: null, legCost: null }, settings(), 0); // 자동 계산값(placeholder)과 이동수단 확인용
+    editingLegId = itemId;
+    const [label, help] = LEG_COST_HELP[leg.mode] || LEG_COST_HELP.transit;
+    $('#legDialogSub').textContent = `${d.items[i - 1].name} → ${it.name}`;
+    $('#legMin').value = it.legMin == null ? '' : it.legMin;
+    $('#legMin').placeholder = `자동 ${leg.durationMin}`;
+    $('#legCostLabel').textContent = label;
+    $('#legCostHelp').textContent = help;
+    $('#legCost').value = it.legCost == null ? '' : it.legCost;
+    $('#legDialog').showModal();
+  }
+
+  function submitLeg(clear) {
+    const it = day().items.find((x) => x.id === editingLegId);
+    if (!it) return $('#legDialog').close();
+    const opt = (sel, max) => {
+      const raw = $(sel).value.trim();
+      const v = Number(raw);
+      return clear || raw === '' || !isFinite(v) ? null : Math.round(Math.min(max, Math.max(0, v)));
+    };
+    it.legMin = opt('#legMin', 1440 * 3);
+    it.legCost = opt('#legCost', 1e8);
+    S.save();
+    $('#legDialog').close();
+    renderAll();
+  }
+
   // ---- 설정 ----
   const SETTINGS_SCHEMA = [
     { group: '여행', fields: [{ path: 'people', label: '여행 인원', unit: '명', min: 1, step: 1, int: true }] },
     {
-      group: '대중교통 (1인, 교통카드 · 조회 실패 시 추정에만 사용)',
+      group: '대중교통 요금 범위',
+      fields: [
+        { path: 'transit.rangePick', label: '요금이 범위로 올 때 합계 기준', options: [[0, '최소'], [0.5, '중간값'], [1, '최대']] },
+      ],
+    },
+    {
+      group: '대중교통 추정 (1인, 교통카드 · 조회 실패 시 추정에만 사용)',
       fields: [
         { path: 'transit.baseFare', label: '기본요금', unit: '원', min: 0, step: 50 },
         { path: 'transit.baseKm', label: '기본요금 적용 거리', unit: 'km', min: 0, step: 1 },
-        { path: 'transit.stepKm', label: '추가요금 단위 거리 (기본~상한)', unit: 'km', min: 0.1, step: 0.5 },
+        { path: 'transit.stepKm', label: '추가요금 단위 거리 (기본~상한)', unit: 'km', min: 0.5, step: 0.5 },
         { path: 'transit.stepFee', label: '단위당 추가요금', unit: '원', min: 0, step: 50 },
         { path: 'transit.stepMaxKm', label: '추가요금 구간 상한', unit: 'km', min: 0, step: 1 },
-        { path: 'transit.farStepKm', label: '상한 초과 단위 거리', unit: 'km', min: 0.1, step: 0.5 },
+        { path: 'transit.farStepKm', label: '상한 초과 단위 거리', unit: 'km', min: 0.5, step: 0.5 },
         { path: 'transit.farStepFee', label: '상한 초과 단위 요금', unit: '원', min: 0, step: 50 },
       ],
     },
@@ -863,7 +964,7 @@
     {
       group: '자가용 (통행료 미포함)',
       fields: [
-        { path: 'car.efficiency', label: '연비', unit: 'km/L', min: 0.1, step: 0.5 },
+        { path: 'car.efficiency', label: '연비', unit: 'km/L', min: 0.5, step: 0.5 },
         { path: 'car.fuelPrice', label: '유가', unit: '원/L', min: 0, step: 10 },
       ],
     },
@@ -871,6 +972,7 @@
       group: '이동 시간 추정',
       fields: [
         { path: 'est.autoWalkKm', label: '자동 선택: 도보 기준 거리', unit: 'km', min: 0, step: 0.1 },
+        { path: 'est.interCityKm', label: '도시 간 이동으로 볼 거리 (대중교통 조회 실패 시)', unit: 'km', min: 1, step: 5 },
         { path: 'est.transitSpeed', label: '대중교통 평균 속도', unit: 'km/h', min: 1, step: 1 },
         { path: 'est.transitOverheadMin', label: '대중교통 대기·환승 시간', unit: '분', min: 0, step: 1 },
         { path: 'est.walk', label: '도보 속도 (조회 실패 시)', unit: 'km/h', min: 0.5, step: 0.5 },
@@ -897,7 +999,9 @@
         ...g.fields.map((f) =>
           el('label', { class: 'field-row' }, [
             el('span', { text: f.label }),
-            el('span', { class: 'field-input' }, [
+            f.options ? el('span', { class: 'field-input' }, [
+              el('select', { name: f.path }, f.options.map(([v, t]) => el('option', { value: String(v), text: t, selected: v === TP.fare.snapRangePick(getPath(settings(), f.path)) }))),
+            ]) : el('span', { class: 'field-input' }, [
               el('input', { type: 'number', name: f.path, min: f.min, step: f.step, required: true, value: String(round4(getPath(settings(), f.path) * (f.scale || 1))) }),
               el('span', { class: 'unit', text: f.unit }),
             ]),
@@ -931,6 +1035,11 @@
   function submitSettings() {
     for (const g of SETTINGS_SCHEMA) {
       for (const f of g.fields) {
+        if (f.options) {
+          const sel = $(`#settingsFields select[name="${f.path}"]`);
+          setPath(settings(), f.path, TP.fare.snapRangePick(Number(sel.value)));
+          continue;
+        }
         const input = $(`#settingsFields input[name="${f.path}"]`);
         let v = Number(input.value);
         if (!isFinite(v)) continue;
@@ -1089,6 +1198,42 @@
     }
   }
 
+  function showPwError(msg) {
+    const p = $('#pwError');
+    p.textContent = msg;
+    p.hidden = !msg;
+  }
+
+  function openPassword() {
+    $('#pwForm').reset();
+    showPwError('');
+    $('#pwDialog').showModal();
+    $('#pwCur').focus();
+  }
+
+  async function submitPassword() {
+    const cur = $('#pwCur').value;
+    const next = $('#pwNew').value;
+    let err = '';
+    if (!cur) err = '현재 비밀번호를 입력해 주세요.';
+    else if (next.length < 8 || next.length > 72) err = '새 비밀번호는 8~72자로 입력해 주세요.';
+    else if (next !== $('#pwNew2').value) err = '새 비밀번호 확인이 일치하지 않아요.';
+    if (err) return showPwError(err);
+    showPwError('');
+    const btn = $('#pwSubmit');
+    btn.disabled = true;
+    try {
+      await TP.auth.changePassword(cur, next);
+      $('#pwDialog').close();
+      $('#pwForm').reset();
+      toast('비밀번호를 변경했어요');
+    } catch (e) {
+      showPwError(e.message || '요청에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   function bindAuth() {
     $('#btnLogin').addEventListener('click', () => openAuth('login'));
     $('#btnSignup').addEventListener('click', () => openAuth('signup'));
@@ -1103,6 +1248,8 @@
       }
       $('#guestBanner').hidden = true;
     });
+    $('#btnPassword').addEventListener('click', openPassword);
+    $('#pwForm').addEventListener('submit', (e) => { e.preventDefault(); submitPassword(); });
     $('#btnLogout').addEventListener('click', async () => {
       if (await TP.auth.logout()) toast('로그아웃했어요');
     });
@@ -1182,6 +1329,8 @@
     // 다이얼로그
     for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', () => b.closest('dialog').close());
     $('#tripForm').addEventListener('submit', (e) => { e.preventDefault(); submitTrip(); });
+    $('#legForm').addEventListener('submit', (e) => { e.preventDefault(); submitLeg(false); });
+    $('#btnLegClear').addEventListener('click', () => submitLeg(true));
     $('#itemForm').addEventListener('submit', (e) => { e.preventDefault(); submitItem(); });
     $('#settingsForm').addEventListener('submit', (e) => { e.preventDefault(); submitSettings(); });
     $('#btnSettings').addEventListener('click', openSettings);

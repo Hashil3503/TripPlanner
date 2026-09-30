@@ -86,13 +86,27 @@ function normStep(s) {
 
 function normRoute(r) {
   const p = (r && r.properties) || {};
-  const fv = p.fare && p.fare.value;
+  const f = (p.fare && typeof p.fare === 'object' ? p.fare : {});
+  let fare = isFiniteNum(f.value) && f.value >= 0 ? Math.round(f.value) : null;
+  let fareMin = null;
+  let fareMax = null;
+  // 요금이 { min, max } 범위로 오는 경우 (공항/광역 버스 등). 단일 값이 있으면 범위는 무시
+  if (fare == null && isFiniteNum(f.min) && isFiniteNum(f.max) && f.min >= 0 && f.max >= 0) {
+    fareMin = Math.round(Math.min(f.min, f.max));
+    fareMax = Math.round(Math.max(f.min, f.max));
+    if (fareMin === fareMax) {
+      fare = fareMin;
+      fareMin = fareMax = null;
+    }
+  }
   return {
     type: str(p.type, 30).toUpperCase() || 'UNKNOWN',
     totalDistance: Math.round(nonNeg(p.totalDistance)),
     totalTime: Math.round(nonNeg(p.totalTime)),
     transfers: Math.round(nonNeg(p.transfers)),
-    fare: isFiniteNum(fv) && fv >= 0 ? Math.round(fv) : null, // 버스 요금이 min/max 범위로만 오는 경우 null
+    fare, // 단일 요금 (범위로만 오면 null)
+    fareMin,
+    fareMax,
     steps: (Array.isArray(r && r.steps) ? r.steps : []).map(normStep),
   };
 }
@@ -197,7 +211,8 @@ function createTransit(opts) {
 
     if (p.sx === p.ex && p.sy === p.ey) return { status: 200, body: { status: 'NO_RESULTS', landingURL: null, routes: [] }, cache: 'SKIP' };
 
-    const ck = `${p.sx.toFixed(5)},${p.sy.toFixed(5)}|${p.ex.toFixed(5)},${p.ey.toFixed(5)}`;
+    // v2|: 요금 범위(fareMin/fareMax) 추가 전에 캐시된 응답은 키가 달라 무시되고, TTL로 정리된다
+    const ck = `v2|${p.sx.toFixed(5)},${p.sy.toFixed(5)}|${p.ex.toFixed(5)},${p.ey.toFixed(5)}`;
     const hit = cacheGet(ck);
     if (hit) return { status: 200, body: hit, cache: 'HIT' };
 
