@@ -190,11 +190,17 @@
     let guestSettings = null;
     if (promptImport && !user) {
       S.saveNow(); // 게스트 데이터를 먼저 저장해 둔다 (로그아웃 후 그대로 돌아올 수 있게)
-      guestTrips = S.state.trips.filter((t) => !S.isSample(t));
+      guestTrips = S.state.trips.filter((t) => !S.isSample(t) && !S.isPlaceholder(t)); // 빈 자리표시 여행/손대지 않은 샘플은 가져오지 않는다
       guestSettings = JSON.parse(JSON.stringify(S.state.settings));
     }
 
-    const list = ((await api('GET', '/api/trips')).trips || []).filter((t) => t && typeof t.id === 'string');
+    let list = ((await api('GET', '/api/trips')).trips || []).filter((t) => t && typeof t.id === 'string');
+    // 예전 버전이 계정에 자동으로 만든 빈 '새 여행'은 목록에서 빼고 서버에서도 지운다 (실패해도 다음 로그인에 다시 시도)
+    const stale = list.filter(S.isPlaceholder);
+    if (stale.length) {
+      list = list.filter((t) => !S.isPlaceholder(t));
+      await Promise.all(stale.map((t) => api('DELETE', `/api/trips/${encodeURIComponent(t.id)}`).catch(() => {})));
+    }
     const serverIds = new Set(list.map((t) => t.id));
 
     const missing = guestTrips.filter((t) => !serverIds.has(t.id));

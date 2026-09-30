@@ -70,6 +70,18 @@
   function renderAll(opts) {
     opts = opts || {};
     S.clampDay();
+    const empty = !trip();
+    $('#panel').classList.toggle('is-home', empty);
+    $('#homeView').hidden = !empty;
+    if (empty) {
+      // 여행이 하나도 없는 홈 화면: 일정 관련 화면은 그리지 않고 지도만 기본 상태로 둔다
+      model = null;
+      selectedId = null;
+      renderTripSelect();
+      renderMap(false);
+      updateStatus();
+      return;
+    }
     model = P.buildTrip(trip(), settings());
     renderTripSelect();
     renderDayTabs();
@@ -94,9 +106,14 @@
   /** 여행 선택 드롭다운: 버튼에 현재 여행 이름, 메뉴에 여행 목록 */
   function renderTripSelect() {
     const cur = trip();
-    $('#tripLabel').textContent = cur.name;
-    $('#tripMenuBtn').title = `여행 선택 · ${cur.name}`;
-    const key = cur.id + '\n' + S.state.trips.map((t) => t.id + '\t' + t.name).join('\n');
+    // 여행이 없으면 선택/수정/삭제/내보내기를 막고 '새 여행'과 '가져오기'만 남긴다
+    $('#tripMenuBtn').disabled = !cur;
+    $('#btnEditTrip').disabled = !cur;
+    $('#btnDeleteTrip').disabled = !cur;
+    $('#btnExport').disabled = !cur;
+    $('#tripLabel').textContent = cur ? cur.name : '여행 없음';
+    $('#tripMenuBtn').title = cur ? `여행 선택 · ${cur.name}` : '여행이 없어요';
+    const key = (cur ? cur.id : '') + '\n' + S.state.trips.map((t) => t.id + '\t' + t.name).join('\n');
     if (renderTripSelect.key === key) return; // 열려 있는 메뉴를 불필요하게 다시 그리지 않는다
     renderTripSelect.key = key;
     $('#tripMenu').replaceChildren(...S.state.trips.map((t) =>
@@ -104,14 +121,14 @@
         type: 'button',
         class: 'menu-item',
         role: 'menuitemradio',
-        'aria-checked': String(t.id === cur.id),
+        'aria-checked': String(cur && t.id === cur.id),
         onclick: () => selectTrip(t.id),
       }, [el('span', { class: 'menu-label', text: t.name }), icon('check', 'menu-check')])
     ));
   }
 
   function selectTrip(id) {
-    if (id === trip().id) return;
+    if (!trip() || id === trip().id) return;
     S.state.currentTripId = id;
     S.state.dayIndex = 0;
     selectedId = null;
@@ -586,7 +603,7 @@
   // ---- 지도 ----
   function renderMap(fit) {
     const groups = [];
-    model.days.forEach((dm, i) => {
+    (model ? model.days : []).forEach((dm, i) => {
       const active = i === S.state.dayIndex;
       if (!S.state.showAll && !active) return;
       groups.push({
@@ -661,6 +678,12 @@
   }
 
   function addPlace(p) {
+    if (!trip()) {
+      // 지도 클릭 팝업 등 여행 없이 들어온 추가 요청: 여행부터 만들도록 안내
+      toast('먼저 여행을 만들어 주세요');
+      openTripDialog('new');
+      return;
+    }
     const d = day();
     const it = S.newItem({ name: String(p.name || '새 장소').slice(0, 100), lat: p.lat, lon: p.lon, category: p.category && p.category !== 'etc' ? p.category : 'sight' });
     d.items.push(it);
@@ -789,20 +812,56 @@
 
   // ---- 다이얼로그 ----
   function openTripDialog(mode) {
+    const t = mode === 'new' ? null : trip();
+    if (mode !== 'new' && !t) return;
     tripDialogMode = mode;
-    const t = trip();
-    $('#tripDialogTitle').textContent = mode === 'new' ? '새 여행' : '여행 수정';
-    $('#tripName').value = mode === 'new' ? '새 여행' : t.name;
-    $('#tripStart').value = mode === 'new' ? new Date().toISOString().slice(0, 10) : t.startDate;
-    $('#tripDays').value = mode === 'new' ? 1 : t.days.length;
+    // 종료일은 저장하지 않고 시작일 + 일수 - 1 로 구한다 (옛 여행처럼 시작일이 없으면 둘 다 비워 두고 입력받는다)
+    const start = t ? t.startDate : S.todayYmd();
+    $('#tripDialogTitle').textContent = t ? '여행 수정' : '새 여행';
+    $('#tripName').value = t ? t.name : '새 여행';
+    $('#tripStart').value = start;
+    $('#tripEnd').value = start ? S.addDays(start, t ? t.days.length - 1 : 0) : '';
+    syncTripDates();
+    showTripError('');
     $('#tripDialog').showModal();
     $('#tripName').select();
   }
 
-  function submitTrip() {
-    const name = $('#tripName').value.trim() || '이름 없는 여행';
+  function showTripError(msg) {
+    const p = $('#tripError');
+    p.textContent = msg;
+    p.hidden = !msg;
+  }
+
+  /** 시작일이 바뀌면 종료일의 최소값을 맞추고, 종료일이 비었거나 시작일보다 앞서면 시작일로 당긴다. 총 일수를 안내한다. */
+  function syncTripDates(fromStart) {
     const start = $('#tripStart').value;
-    const days = Math.min(30, Math.max(1, Math.round(Number($('#tripDays').value) || 1)));
+    const end = $('#tripEnd');
+    end.min = start;
+    if (fromStart && start && (!end.value || end.value < start)) end.value = start;
+    const n = S.daySpan(start, end.value);
+    $('#tripSpan').textContent = n >= 1 && n <= S.MAX_DAYS ? `총 ${n}일 (${n > 1 ? `${n - 1}박 ${n}일` : '당일치기'})` : `여행 기간은 최대 ${S.MAX_DAYS}일까지 정할 수 있어요.`;
+  }
+
+  function validateTrip(name, start, end) {
+    if (!name) return '여행 이름을 입력해 주세요.';
+    if (!start) return '시작일을 선택해 주세요.';
+    if (!end) return '종료일을 선택해 주세요.';
+    const n = S.daySpan(start, end);
+    if (isNaN(n)) return '올바른 날짜를 입력해 주세요.';
+    if (n < 1) return '종료일은 시작일 이후여야 해요.';
+    if (n > S.MAX_DAYS) return `여행 기간은 최대 ${S.MAX_DAYS}일이에요.`;
+    return '';
+  }
+
+  function submitTrip() {
+    const name = $('#tripName').value.trim();
+    const start = $('#tripStart').value;
+    const end = $('#tripEnd').value;
+    const err = validateTrip(name, start, end);
+    if (err) return showTripError(err);
+    showTripError('');
+    const days = S.daySpan(start, end);
     if (tripDialogMode === 'new') {
       const t = S.newTrip(name, start, days);
       S.state.trips.push(t);
@@ -812,7 +871,7 @@
       const t = trip();
       if (days < t.days.length) {
         const lost = t.days.slice(days).reduce((n, d) => n + d.items.length, 0);
-        if (lost && !confirm(`일수를 줄이면 ${days + 1}일차 이후의 일정 ${lost}개가 삭제됩니다. 계속할까요?`)) return;
+        if (lost && !confirm(`여행 기간을 줄이면 ${days + 1}일차 이후의 일정 ${lost}개가 삭제됩니다. 계속할까요?`)) return;
         t.days.length = days;
       }
       while (t.days.length < days) t.days.push(S.newDay());
@@ -827,14 +886,25 @@
 
   function deleteTrip() {
     const t = trip();
-    if (!confirm(`"${t.name}" 여행을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    if (!t || !confirm(`"${t.name}" 여행을 삭제할까요? 되돌릴 수 없습니다.`)) return;
     S.state.trips = S.state.trips.filter((x) => x.id !== t.id);
-    if (!S.state.trips.length) S.state.trips.push(S.newTrip('새 여행', '', 1));
-    S.state.currentTripId = S.state.trips[0].id;
+    S.state.currentTripId = S.state.trips.length ? S.state.trips[0].id : null; // 마지막 여행이면 홈 화면
     S.state.dayIndex = 0;
     selectedId = null;
     S.save();
     renderAll({ fit: true });
+  }
+
+  /** 홈 화면의 '샘플 여행 둘러보기': 서울 1박 2일 샘플을 여행 목록에 추가한다 */
+  function createSampleTrip() {
+    const t = TP.sample.create();
+    S.state.trips.push(t);
+    S.state.currentTripId = t.id;
+    S.state.dayIndex = 0;
+    selectedId = null;
+    S.save();
+    renderAll({ fit: true });
+    toast('샘플 여행을 만들었어요. 마음대로 고쳐 보세요');
   }
 
   function openItemDialog(id) {
@@ -1072,8 +1142,9 @@
 
   // ---- 내보내기 / 가져오기 ----
   function exportFile() {
+    if (!S.state.trips.length) return toast('내보낼 여행이 없어요');
     const blob = new Blob([S.exportJSON()], { type: 'application/json' });
-    const a = el('a', { href: URL.createObjectURL(blob), download: `trip-planner-${new Date().toISOString().slice(0, 10)}.json` });
+    const a = el('a', { href: URL.createObjectURL(blob), download: `trip-planner-${S.todayYmd()}.json` });
     document.body.append(a);
     a.click();
     a.remove();
@@ -1125,6 +1196,8 @@
     $('#userBtn').setAttribute('aria-label', u ? '계정 메뉴 (' + u.username + ')' : '계정 메뉴');
     if (u && !$('#userMenu').hidden) UI.closeMenus();
     $('#guestBanner').hidden = !!u || bannerHidden();
+    // 홈 화면의 로그인 안내는 상단 배너가 이미 보일 때는 겹치지 않게 숨긴다
+    $('#homeGuestNote').hidden = !!u || !bannerHidden();
   }
 
   function renderSaveStatus(st) {
@@ -1247,7 +1320,9 @@
         /* 이번 방문에만 숨김 */
       }
       $('#guestBanner').hidden = true;
+      $('#homeGuestNote').hidden = !!TP.auth.current();
     });
+    $('#btnHomeLogin').addEventListener('click', () => openAuth('login'));
     $('#btnPassword').addEventListener('click', openPassword);
     $('#pwForm').addEventListener('submit', (e) => { e.preventDefault(); submitPassword(); });
     $('#btnLogout').addEventListener('click', async () => {
@@ -1290,6 +1365,9 @@
     $('#btnNewTrip').addEventListener('click', () => openTripDialog('new'));
     $('#btnEditTrip').addEventListener('click', () => openTripDialog('edit'));
     $('#btnDeleteTrip').addEventListener('click', deleteTrip);
+    $('#btnHomeNew').addEventListener('click', () => openTripDialog('new'));
+    $('#btnHomeSample').addEventListener('click', createSampleTrip);
+    $('#btnHomeImport').addEventListener('click', () => $('#fileImport').click());
     $('#btnDeleteDay').addEventListener('click', deleteDay);
     $('#btnLegsToggle').addEventListener('click', (e) => setAllLegs(e.currentTarget.dataset.action === 'collapse'));
     $('#btnRetry').addEventListener('click', () => { TP.routing.clearFailures(); renderAll(); });
@@ -1329,6 +1407,8 @@
     // 다이얼로그
     for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', () => b.closest('dialog').close());
     $('#tripForm').addEventListener('submit', (e) => { e.preventDefault(); submitTrip(); });
+    $('#tripStart').addEventListener('input', () => { syncTripDates(true); showTripError(''); });
+    $('#tripEnd').addEventListener('input', () => { syncTripDates(false); showTripError(''); });
     $('#legForm').addEventListener('submit', (e) => { e.preventDefault(); submitLeg(false); });
     $('#btnLegClear').addEventListener('click', () => submitLeg(true));
     $('#itemForm').addEventListener('submit', (e) => { e.preventDefault(); submitItem(); });
