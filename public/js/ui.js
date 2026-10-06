@@ -256,5 +256,49 @@
     if (e.key === 'Escape' && openMenu) openMenu.close(true);
   });
 
-  TP.ui = { icon, modeIcon, catIcon, inkOn, routePills, menu, closeMenus: () => closeAll(), MODE_ICON, CAT_ICON };
+  // =====================================================================
+  // 사이드바 접기/펼치기 (좌: 일정, 우: 요약). 상태는 localStorage에 'collapsed'/'open'으로 저장.
+  // 저장값이 없으면 좌측은 펼침, 우측은 중간 폭(<1024px)에서만 접힘. 모바일(<768px)은 CSS가 항상 펼친다.
+  // =====================================================================
+  const narrow = window.matchMedia ? window.matchMedia('(max-width: 1023px)') : null;
+
+  /** sidebar(side, button, { key, side, label, defaultCollapsed }) - side는 .side 래퍼 */
+  function sidebar(side, btn, opts) {
+    let stored = null;
+    try {
+      const v = localStorage.getItem(opts.key);
+      if (v === 'collapsed' || v === 'open') stored = v;
+    } catch (e) {
+      /* 저장소를 못 쓰면 기본값 */
+    }
+    const use = btn.querySelector('use');
+    function apply(collapsed) {
+      side.classList.toggle('is-collapsed', collapsed);
+      btn.setAttribute('aria-expanded', String(!collapsed));
+      const text = opts.label + (collapsed ? ' 펼치기' : ' 접기');
+      btn.setAttribute('aria-label', text);
+      btn.title = text;
+      // 아이콘은 "누르면 일어날 동작" 방향: 좌측은 접기=왼쪽, 우측은 접기=오른쪽
+      const left = opts.side === 'left';
+      use.setAttribute('href', left !== collapsed ? '#i-chevron-left' : '#i-chevron-right');
+    }
+    apply(stored ? stored === 'collapsed' : opts.defaultCollapsed ? opts.defaultCollapsed() : false);
+    btn.addEventListener('click', () => {
+      const next = !side.classList.contains('is-collapsed');
+      apply(next);
+      try {
+        localStorage.setItem(opts.key, next ? 'collapsed' : 'open');
+      } catch (e) {
+        /* 이번 방문에만 적용 */
+      }
+    });
+  }
+
+  function initSidebars() {
+    const $ = (id) => document.getElementById(id);
+    sidebar($('sideLeft'), $('toggleLeft'), { key: 'tripplanner.ui.left', side: 'left', label: '일정' });
+    sidebar($('sideRight'), $('toggleRight'), { key: 'tripplanner.ui.right', side: 'right', label: '요약', defaultCollapsed: () => !!(narrow && narrow.matches) });
+  }
+
+  TP.ui = { initSidebars, icon, modeIcon, catIcon, inkOn, routePills, menu, closeMenus: () => closeAll(), MODE_ICON, CAT_ICON };
 })();

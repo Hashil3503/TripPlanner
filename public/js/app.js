@@ -72,6 +72,7 @@
     S.clampDay();
     const empty = !trip();
     $('#panel').classList.toggle('is-home', empty);
+    $('.layout').classList.toggle('is-home', empty);
     $('#homeView').hidden = !empty;
     if (empty) {
       // 여행이 하나도 없는 홈 화면: 일정 관련 화면은 그리지 않고 지도만 기본 상태로 둔다
@@ -1350,6 +1351,7 @@
   // 초기화
   // =====================================================================
   function bind() {
+    UI.initSidebars();
     // 헤더 드롭다운 메뉴들 (Esc/바깥 클릭으로 닫힘, 화살표 키 이동)
     UI.menu($('#tripMenuBtn'), $('#tripMenu'), { align: 'start' });
     UI.menu($('#tripMoreBtn'), $('#tripMoreMenu'), { align: 'start' });
@@ -1432,9 +1434,12 @@
 
     $('#itemCat').replaceChildren(...TP.CATEGORIES.map((c) => el('option', { value: c.id, text: c.label })));
 
-    // 스크롤하면 고정된 검색 바 아래에 그림자
+    // 스크롤하면 고정된 검색 바 아래에 그림자 (데스크톱은 패널이, 모바일은 .layout이 스크롤된다)
     const panel = $('#panel');
-    panel.addEventListener('scroll', () => $('#searchBar').classList.toggle('scrolled', panel.scrollTop > 4), { passive: true });
+    const searchBar = $('#searchBar');
+    const onScroll = () => searchBar.classList.toggle('scrolled', panel.scrollTop > 4 || panel.getBoundingClientRect().top < searchBar.getBoundingClientRect().top - 4);
+    panel.addEventListener('scroll', onScroll, { passive: true });
+    $('.layout').addEventListener('scroll', onScroll, { passive: true });
   }
 
   function initSortable() {
