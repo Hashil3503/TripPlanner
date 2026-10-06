@@ -502,7 +502,7 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 .item { position: relative; scroll-margin-top: 96px; }
 .stop { position: relative; padding-left: 40px; }
 .node {
-  position: absolute; left: 0; top: 10px; z-index: 1;
+  position: absolute; left: 0; top: calc(50% - 14px); z-index: 1; /* 카드 세로 중앙 (transform은 :active 축소에 쓰므로 top으로 맞춘다) */
   display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
   background: var(--day); color: var(--day-ink); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 4px var(--bg-panel);
@@ -520,7 +520,10 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { button.node, .node-chev { transition: none; } }
 /* 타임라인 선: 노드 아래로 이어지고, 구간 행을 관통한다 */
 .item:not(:last-child) .stop::after, .leg::before { content: ''; position: absolute; left: 13px; width: 2px; background: color-mix(in srgb, var(--day) 45%, var(--border)); }
-.item:not(:last-child) .stop::after { top: 38px; bottom: 0; }
+/* 구간 선은 지도의 같은 구간 색과 맞춰 진하게 */
+.leg::before { left: 12px; width: 4px; background: var(--leg, var(--day)); }
+.item:not(:first-child) .stop::before { content: ''; position: absolute; top: 0; height: 50%; left: 12px; width: 4px; background: var(--prev-leg, var(--day)); } /* 들어오는 구간 선을 노드까지 */
+.item:not(:last-child) .stop::after { top: 50%; bottom: 0; left: 12px; width: 4px; background: var(--next-leg, var(--day)); } /* 다음 구간 선과 한 색으로 이어진다 */
 .leg::before { top: 0; bottom: 0; }
 
 .item-card {
@@ -552,9 +555,6 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 .item-times { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .item-times .icon { width: 14px; height: 14px; }
 .item-times.late { color: var(--danger); font-weight: 600; }
-.item-memo { font-size: 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
-.item-costs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
-.cost-chip {
 .item-times .times-text { min-width: 0; }
 .item-times .fixed { font-weight: 700; color: var(--text); white-space: nowrap; }
 .item-times .fixed-ico { width: 11px; height: 11px; margin-right: 2px; vertical-align: -1px; color: var(--accent, currentColor); }
@@ -562,6 +562,9 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 .item-gap .icon { width: 13px; height: 13px; flex: none; }
 .item-gap.wait { color: var(--ok); }
 .item-gap.late { color: var(--warn); font-weight: 600; }
+.item-memo { font-size: 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.item-costs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.cost-chip {
   display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px;
   background: var(--surface-2); color: var(--text-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
 }
@@ -600,6 +603,7 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 }
 .leg-summary:hover { background: var(--surface-2); color: var(--text); }
 .leg-summary:focus-visible { outline-offset: 0; }
+.leg-swatch { flex: none; width: 4px; height: 16px; margin-left: -2px; border-radius: 2px; background: var(--leg, var(--day)); }
 .leg-summary .leg-mode-ico { width: 16px; height: 16px; }
 .leg-sum-text { min-width: 0; font-weight: 600; color: var(--text); white-space: nowrap; }
 .leg-summary .tag.loading { padding-left: 0; }

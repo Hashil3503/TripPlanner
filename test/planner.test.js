@@ -261,3 +261,13 @@ test('normItem: 고정 시각 검증', () => {
   // 시작 없이 종료만 있으면 그대로
   assert.equal(TP.store.normItem({ ...base, fixedEnd: '09:00' }).fixedEnd, '09:00');
 });
+
+test('legColor: 전체 표시면 일차 색, 한 일차만 보이면 구간 순서대로 돌려 쓴다', () => {
+  const { legColor, LEG_COLORS } = TP.planner;
+  assert.equal(legColor('#123456', 3, true), '#123456');
+  assert.equal(legColor('#123456', 0, false), LEG_COLORS[0]);
+  assert.equal(legColor('#123456', LEG_COLORS.length, false), LEG_COLORS[0]);
+  // 이웃한 구간은 항상 다른 색, 팔레트에 중복 없음
+  for (let i = 0; i < LEG_COLORS.length * 2; i++) assert.notEqual(legColor('#000', i, false), legColor('#000', i + 1, false));
+  assert.equal(new Set(LEG_COLORS).size, LEG_COLORS.length);
+});

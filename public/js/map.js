@@ -230,7 +230,7 @@
     if (legTip) legTip.setMap(null);
   }
 
-  /** model: { groups: [{ dayIndex, color, active, points:[{item, number, arrival}], legs:[leg] }], selectedId } */
+  /** model: { groups: [{ dayIndex, color, active, points:[{item, number, arrival}], legs:[{ leg, color }] }], selectedId } */
   function render(model) {
     if (!map) {
       pending.model = model;
@@ -244,21 +244,21 @@
     for (const g of model.groups) {
       const dim = !g.active;
       // 경로: 조회 성공한 도로 경로는 실선, 대중교통(추정)/조회 실패는 점선
-      for (const leg of g.legs) {
+      for (const { leg, color } of g.legs) {
         const z = dim ? Z.dim : Z.line;
         if (leg.transitReal && !leg.loading) {
           // 카카오 대중교통 실경로: 버스/지하철은 실선(지하철이 조금 더 굵게), 도보·빈 구간은 가는 점선
           for (const p of transitPieces(leg)) {
-            if (p.walk) addLine(leg, p.path, g.color, dim ? 2 : 3, dim ? 0.35 : 0.8, 'shortdot', z);
+            if (p.walk) addLine(leg, p.path, color, dim ? 2 : 3, dim ? 0.35 : 0.8, 'shortdot', z);
             else {
               const st = STEP_STYLE[p.type] || STEP_STYLE.BUS;
-              addLine(leg, p.path, g.color, dim ? Math.max(3, st.weight - 2) : st.weight, dim ? 0.35 : 0.85, st.style, z + 0.1);
+              addLine(leg, p.path, color, dim ? Math.max(3, st.weight - 2) : st.weight, dim ? 0.35 : 0.85, st.style, z + 0.1);
             }
           }
           continue;
         }
         const dashed = leg.transit || leg.estimated || leg.loading;
-        addLine(leg, leg.geometry, g.color, dim ? 3 : 5, dim ? 0.35 : 0.85, dashed ? 'dash' : 'solid', z);
+        addLine(leg, leg.geometry, color, dim ? 3 : 5, dim ? 0.35 : 0.85, dashed ? 'dash' : 'solid', z);
       }
       for (const p of g.points) {
         const selected = p.item.id === model.selectedId;
