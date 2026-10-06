@@ -55,6 +55,8 @@
   const settings = () => S.state.settings;
   const won = F.fmtWon;
   const colorOf = (i) => P.DAY_COLORS[i % P.DAY_COLORS.length];
+  /** 지도 선과 사이드바 구간이 같은 색을 쓰도록 한 곳에서 정한다 (legIndex: 그 일차에서 구간의 순서) */
+  const legColorOf = (dayIndex, legIndex) => P.legColor(colorOf(dayIndex), legIndex, S.state.showAll);
 
   function toast(msg) {
     const t = $('#toast');
@@ -227,9 +229,9 @@
           icon(row.late ? 'alert' : 'clock'),
           el('span', { class: 'times-text' }, timeParts),
         ]),
+        gapNote,
         item.memo ? el('div', { class: 'item-memo', text: item.memo }) : null,
         costChips.length ? el('div', { class: 'item-costs' }, costChips) : null,
-        gapNote,
       ]),
       el('div', { class: 'item-actions' }, [
         el('button', { type: 'button', class: 'icon-btn sm', title: '수정', 'aria-label': `${item.name} 수정`, onclick: (e) => { e.stopPropagation(); openItemDialog(item.id); } }, icon('pencil')),
@@ -237,11 +239,15 @@
       ]),
     ]);
 
+    // 구간 순서: 첫 장소를 뺀 모든 장소에 들어오는 구간이 있으므로 들어오는 구간은 idx - 1, 나가는 구간은 idx
+    const last = idx === dm.rows.length - 1;
     return el('li', {
       class: 'item' + (item.id === selectedId ? ' selected' : '') + (row.late ? ' over-midnight' : ''),
+      // 장소 옆 타임라인 선도 들어오는/나가는 구간 색으로 이어지게
+      style: (idx > 0 ? `--prev-leg:${legColorOf(dm.dayIndex, idx - 1)};` : '') + (last ? '' : `--next-leg:${legColorOf(dm.dayIndex, idx)}`),
       dataset: { id: item.id },
     }, [
-      row.leg ? buildLeg(row.leg, item) : null,
+      row.leg ? buildLeg(row.leg, item, legColorOf(dm.dayIndex, idx - 1)) : null,
       el('div', { class: 'stop' }, [buildNode(idx, dm), card]),
     ]);
   }
@@ -368,7 +374,7 @@
   const INTERCITY_HINT = '카카오 대중교통은 도시 간 경로(KTX·고속버스 등)를 알려주지 않아요. 시간·요금을 직접 입력해 주세요';
   const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요';
 
-  function buildLeg(leg, item) {
+  function buildLeg(leg, item, color) {
     const modes = MODES.map((m) => {
       const on = m.id === leg.mode;
       return el('button', {
@@ -432,7 +438,7 @@
     const summaryText = `${F.fmtDuration(leg.durationMin)} · ${legCostShort(leg)}`;
     const warnText = notes.join(', ');
 
-    const legEl = el('div', { class: 'leg' + (leg.loading ? ' is-loading' : ''), dataset: { key: legKey(item.id) } }, [
+    const legEl = el('div', { class: 'leg' + (leg.loading ? ' is-loading' : ''), style: `--leg:${color}`, dataset: { key: legKey(item.id) } }, [
       // 접힌 상태: 이동수단 아이콘 + 시간 · 비용 (+ 경고) + 펼침 화살표
       el('div', { class: 'leg-pane leg-pane-min' }, el('div', { class: 'leg-pane-in' },
         el('button', {
@@ -444,6 +450,7 @@
           'aria-label': `이동 구간 상세 펼치기: ${modeLabel} ${summaryText}` + (leg.loading ? ', 계산 중' : '') + (warnText ? `, ${warnText}` : ''),
           onclick: (e) => toggleLeg(e.currentTarget.closest('.leg')),
         }, [
+          el('span', { class: 'leg-swatch', 'aria-hidden': 'true' }),
           UI.modeIcon(leg.mode, `leg-mode-ico m-${leg.mode}`),
           el('span', { class: 'leg-sum-text', text: summaryText }),
           leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']) : null,
@@ -541,6 +548,8 @@
     ];
     if (dm.rows.length) dayKids.push(el('p', { class: 'summary-note' }, [icon('clock'), `일정 종료 예정 ${F.fmtTime(s.end)}`]));
     if (s.unknownCostLegs) dayKids.push(el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(s.unknownCostLegs)} · 이동 구간의 직접 입력으로 채울 수 있어요`]));
+    if (s.waitMin > 0) dayKids.push(el('p', { class: 'summary-note' }, [icon('clock'), `여유 시간 합계 ${F.fmtDuration(s.waitMin)}`]));
+    if (s.lateCount > 0) dayKids.push(el('p', { class: 'warn-box' }, [icon('alert'), el('span', { text: `고정 시각에 늦는 장소가 ${s.lateCount}곳 있어요. 순서나 체류 시간을 조정해 보세요.` })]));
     if (s.late) dayKids.push(el('p', { class: 'warn-box' }, [icon('alert'), el('span', { text: `이 날의 일정이 자정을 넘깁니다 (종료 ${F.fmtTime(s.end)}). 체류 시간이나 순서를 조정해 보세요.` })]));
     dayBox.replaceChildren(...dayKids);
 
@@ -548,8 +557,6 @@
     const t = model.totals;
     const rows = BAR_ROWS.map((r) => ({ ...r, value: r.id === 'extra' ? t.extra : t.byMode[r.id] }));
     const max = Math.max(...rows.map((r) => r.value), 1);
-    if (s.waitMin > 0) dayKids.push(el('p', { class: 'summary-note' }, [icon('clock'), `여유 시간 합계 ${F.fmtDuration(s.waitMin)}`]));
-    if (s.lateCount > 0) dayKids.push(el('p', { class: 'warn-box' }, [icon('alert'), el('span', { text: `고정 시각에 늦는 장소가 ${s.lateCount}곳 있어요. 순서나 체류 시간을 조정해 보세요.` })]));
 
     const bars = rows.filter((r) => r.value > 0).map((r) =>
       el('div', { class: 'bar-row' }, [
@@ -623,7 +630,7 @@
         color: colorOf(i),
         active,
         points: dm.rows.map((r, n) => ({ item: r.item, number: n + 1, arrival: r.arrival })),
-        legs: dm.rows.filter((r) => r.leg).map((r) => r.leg),
+        legs: dm.rows.filter((r) => r.leg).map((r, n) => ({ leg: r.leg, color: legColorOf(i, n) })),
       });
     });
     TP.map.render({ groups, selectedId });
@@ -928,13 +935,6 @@
     $('#itemLon').value = it.lon;
     $('#itemCat').value = it.category;
     $('#itemStay').value = it.stay;
-    $('#itemCost').value = it.cost;
-    $('#itemParking').value = it.parking;
-    $('#itemMemo').value = it.memo;
-    $('#itemDay').replaceChildren(...trip().days.map((d, i) => {
-      const date = F.fmtDate(F.dayDate(trip(), i));
-      return el('option', { value: String(i), text: `${i + 1}일차${date ? ' · ' + date : ''}`, selected: i === S.state.dayIndex });
-    }));
     $('#itemStay').disabled = false; // 이전에 연 장소의 상태를 지운다
     delete $('#itemStay').dataset.saved;
     $('#itemFixedStart').value = it.fixedStart || '';
@@ -944,17 +944,17 @@
     $('#itemTimeHint').textContent = first && !it.fixedStart && !it.fixedEnd ? `시각을 비우면 ${day().startTime}(자동)에 시작해요. ${hint}` : hint;
     showItemError('');
     syncItemTimeFields();
+    $('#itemCost').value = it.cost;
+    $('#itemParking').value = it.parking;
+    $('#itemMemo').value = it.memo;
+    $('#itemDay').replaceChildren(...trip().days.map((d, i) => {
+      const date = F.fmtDate(F.dayDate(trip(), i));
+      return el('option', { value: String(i), text: `${i + 1}일차${date ? ' · ' + date : ''}`, selected: i === S.state.dayIndex });
+    }));
     $('#itemDay').value = String(S.state.dayIndex);
     $('#itemDialog').showModal();
   }
 
-  function submitItem() {
-    const it = day().items.find((x) => x.id === editingItemId);
-    if (!it) return $('#itemDialog').close();
-    const nn = (id, def, min, max) => {
-      const v = Number($(id).value);
-      return isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
-    };
   function showItemError(msg) {
     const p = $('#itemError');
     p.textContent = msg;
@@ -975,12 +975,19 @@
     showItemError('');
   }
 
-    it.name = $('#itemName').value.trim().slice(0, 100) || '이름 없는 장소';
-    it.lat = nn('#itemLat', it.lat, -90, 90);
-    it.lon = nn('#itemLon', it.lon, -180, 180);
+  function submitItem() {
+    const it = day().items.find((x) => x.id === editingItemId);
+    if (!it) return $('#itemDialog').close();
     const fs = $('#itemFixedStart').value || null;
     const fe = $('#itemFixedEnd').value || null;
     if (fs && fe && fe <= fs) return showItemError('종료 시각은 시작 시각보다 늦어야 해요.');
+    const nn = (id, def, min, max) => {
+      const v = Number($(id).value);
+      return isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
+    };
+    it.name = $('#itemName').value.trim().slice(0, 100) || '이름 없는 장소';
+    it.lat = nn('#itemLat', it.lat, -90, 90);
+    it.lon = nn('#itemLon', it.lon, -180, 180);
     it.category = $('#itemCat').value;
     if (!(fs && fe)) it.stay = Math.round(nn('#itemStay', 60, 0, 1440)); // 둘 다 정하면 체류는 시각 차이로 계산되므로 기존 값을 보존
     it.fixedStart = fs;

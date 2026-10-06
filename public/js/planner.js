@@ -3,6 +3,8 @@
   'use strict';
   const TP = (window.TP = window.TP || {});
 
+  // 한 일차만 지도에 보일 때 구간(A→B, B→C…)마다 돌려 쓰는 색: 이웃한 구간끼리 확실히 구분되는 색상
+  const LEG_COLORS = ['#e03131', '#1971c2', '#2f9e44', '#f08c00', '#9c36b5', '#0c8599', '#8d5524', '#e64980'];
   const DAY_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#d6336c', '#0c8599', '#f08c00', '#5f3dc4'];
   const MODE_IDS = ['walk', 'bike', 'transit', 'taxi', 'car'];
 
@@ -216,5 +218,10 @@
   }
 
   TP.fmt = { fmtTime, fmtDuration, fmtDist, fmtWon, fmtDate, parseTime, dayDate };
-  TP.planner = { DAY_COLORS, MODE_IDS, resolveMode, computeLeg, buildDay, buildTrip, stepIcon, stepName, routeSummary, routeTypeLabel };
+  /** 구간 색: 일차 전체 표시 중이면 일차 색, 한 일차만 보일 땐 구간 순서(0부터)대로 팔레트를 돌려 쓴다 */
+  function legColor(dayColor, legIndex, showAll) {
+    return showAll ? dayColor : LEG_COLORS[legIndex % LEG_COLORS.length];
+  }
+
+  TP.planner = { DAY_COLORS, LEG_COLORS, legColor, MODE_IDS, resolveMode, computeLeg, buildDay, buildTrip, stepIcon, stepName, routeSummary, routeTypeLabel };
 })();
