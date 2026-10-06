@@ -127,3 +127,16 @@ test('addDays: 종료일 = 시작일 + 일수 - 1', () => {
   // 왕복: 시작일과 일수로 만든 종료일의 일수가 다시 같은 값이 된다
   for (const n of [1, 2, 7, 30]) assert.equal(S.daySpan('2026-10-25', S.addDays('2026-10-25', n - 1)), n);
 });
+
+test('normItem: 고정 시각 정규화, 옛 데이터는 null, 샘플 지문에 반영', () => {
+  const base = { name: 'x', lat: 1, lon: 2 };
+  const legacy = S.normItem(base);
+  assert.deepEqual([legacy.fixedStart, legacy.fixedEnd], [null, null]);
+  assert.deepEqual([S.normItem({ ...base, fixedStart: '25:00', fixedEnd: 'x' }).fixedStart, S.normItem({ ...base, fixedEnd: '7:00' }).fixedEnd], [null, null]);
+  const swapped = S.normItem({ ...base, fixedStart: '12:00', fixedEnd: '11:00' });
+  assert.deepEqual([swapped.fixedStart, swapped.fixedEnd], ['12:00', null]);
+  assert.deepEqual([S.newItem().fixedStart, S.newItem().fixedEnd], [null, null]);
+  const t = globalThis.TP.sample.create();
+  t.days[0].items[0].fixedStart = '09:30';
+  assert.equal(S.isSample(t), false);
+});

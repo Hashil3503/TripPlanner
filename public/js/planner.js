@@ -134,7 +134,7 @@
     const stats = {
       travelMin: 0, distance: 0, transport: 0, extra: 0, total: 0,
       byMode: { walk: 0, bike: 0, transit: 0, taxi: 0, car: 0 },
-      legCount: 0, failedLegs: 0, unknownCostLegs: 0, loadingLegs: 0, end: clock, late: false,
+      legCount: 0, failedLegs: 0, unknownCostLegs: 0, loadingLegs: 0, waitMin: 0, lateCount: 0, end: clock, late: false,
     };
     const people = Math.max(1, Math.round(settings.people || 1));
 
@@ -152,10 +152,35 @@
         if (leg.loading) stats.loadingLegs++;
         else if (leg.estimated) stats.failedLegs++;
       }
-      const arrival = clock;
-      clock += item.stay;
+      // est: 고정 시각을 무시한 도착 예정. 시작·종료·체류 중 두 개가 정해지면 나머지는 계산한다:
+      // 목표 시작 = 고정 시작, 없으면 고정 종료 - 체류. 목표 시작까지 기다리고(여유), 이미 지났으면 늦음
+      const est = clock;
+      let target = null;
+      if (item.fixedStart) target = parseTime(item.fixedStart);
+      else if (item.fixedEnd) target = Math.max(0, parseTime(item.fixedEnd) - item.stay);
+      let start = est;
+      let waitMin = 0;
+      let lateMin = 0;
+      if (target != null) {
+        if (!prev) start = target; // 첫 장소는 목표 시작이 곧 하루의 시작
+        else {
+          start = Math.max(est, target);
+          if (target > est) waitMin = target - est;
+          else lateMin = est - target;
+        }
+      }
+      let endLateMin = 0;
+      if (item.fixedEnd) {
+        const fe = parseTime(item.fixedEnd);
+        clock = Math.max(fe, start);
+        endLateMin = Math.max(0, start - fe);
+      } else {
+        clock = start + item.stay;
+      }
+      stats.waitMin += waitMin;
+      if (lateMin > 0 || endLateMin > 0) stats.lateCount++;
       stats.extra += item.cost * people;
-      rows.push({ item, arrival, departure: clock, leg, late: clock >= 1440 || arrival >= 1440 });
+      rows.push({ item, est, arrival: start, departure: clock, leg, waitMin, lateMin, endLateMin, late: clock >= 1440 || start >= 1440 });
       prev = item;
     }
     stats.end = clock;

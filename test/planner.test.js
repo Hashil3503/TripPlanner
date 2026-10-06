@@ -139,3 +139,125 @@ test('legCost: override는 unknown보다 우선', () => {
   assert.equal(c.unknown, false);
   assert.equal(c.total, 2000);
 });
+
+// ---- 고정 시작/종료 시각 (TP-009) ----
+// 이동 시간을 20분으로 고정해 도착 예정을 계산하기 쉽게 한다 (직접 입력 legMin)
+const fixedDay = (items, startTime = '09:00') => ({ startTime, items });
+const first = (o) => item({ id: 'a', modeIn: null, stay: 30, ...o }); // 09:00 도착, 09:30 출발
+const second = (o) => item({ id: 'b', legMin: 20, stay: 60, ...o }); // 09:50 도착 예정
+const build = (items, startTime) => P.buildDay(fixedDay(items, startTime), 0, { ...fare.DEFAULT_CONFIG, people: 1 });
+
+test('고정 시각 없음: 기존 연쇄 계산 그대로, 여유/늦음 없음', () => {
+  const d = build([first(), second()]);
+  assert.equal(d.rows[0].arrival, 540);
+  assert.equal(d.rows[0].departure, 570);
+  assert.equal(d.rows[1].est, 590);
+  assert.equal(d.rows[1].arrival, 590);
+  assert.equal(d.rows[1].departure, 650);
+  for (const r of d.rows) assert.deepEqual([r.waitMin, r.lateMin, r.endLateMin], [0, 0, 0]);
+  assert.equal(d.stats.waitMin, 0);
+  assert.equal(d.stats.lateCount, 0);
+  assert.equal(d.stats.end, 650);
+});
+
+test('고정 시작이 도착 예정보다 늦으면 여유 시간만큼 기다리고 뒤 일정이 밀린다', () => {
+  const d = build([first(), second({ fixedStart: '10:30' }), item({ id: 'c', legMin: 10, stay: 20 })]);
+  const r = d.rows[1];
+  assert.equal(r.est, 590);
+  assert.equal(r.arrival, 630);
+  assert.equal(r.waitMin, 40);
+  assert.equal(r.lateMin, 0);
+  assert.equal(r.departure, 690);
+  assert.equal(d.rows[2].arrival, 700);
+  assert.equal(d.stats.waitMin, 40);
+  assert.equal(d.stats.lateCount, 0);
+});
+
+test('고정 시작보다 늦게 도착하면 늦음 (시작은 도착 시각)', () => {
+  const d = build([first(), second({ fixedStart: '09:30' })]);
+  const r = d.rows[1];
+  assert.equal(r.arrival, 590);
+  assert.equal(r.lateMin, 20);
+  assert.equal(r.waitMin, 0);
+  assert.equal(r.departure, 650);
+  assert.equal(d.stats.lateCount, 1);
+});
+
+test('고정 종료 + 체류: 시작 = 종료 - 체류로 역산해 여유 표시', () => {
+  const d = build([first(), second({ fixedEnd: '11:00' })]); // 체류 60분 -> 목표 시작 10:00
+  const r = d.rows[1];
+  assert.equal(r.est, 590);
+  assert.equal(r.arrival, 600);
+  assert.equal(r.waitMin, 10);
+  assert.equal(r.departure, 660);
+  assert.equal(r.endLateMin, 0);
+});
+
+test('고정 종료 + 체류: 역산한 시작보다 늦게 도착하면 늦음, 종료 시각은 유지', () => {
+  const d = build([first(), second({ fixedEnd: '10:30' })]); // 목표 시작 09:30, 도착 예정 09:50
+  const r = d.rows[1];
+  assert.equal(r.arrival, 590);
+  assert.equal(r.lateMin, 20);
+  assert.equal(r.departure, 630);
+  assert.equal(d.stats.lateCount, 1);
+});
+
+test('첫 장소: 고정 종료만 있으면 종료 - 체류에 시작', () => {
+  const r = build([first({ fixedEnd: '10:00' })], '07:00').rows[0]; // 체류 30분
+  assert.equal(r.arrival, 570);
+  assert.equal(r.departure, 600);
+  assert.deepEqual([r.waitMin, r.lateMin], [0, 0]);
+});
+
+test('고정 시작과 종료 모두', () => {
+  const d = build([first(), second({ fixedStart: '10:00', fixedEnd: '11:30' })]);
+  const r = d.rows[1];
+  assert.equal(r.arrival, 600);
+  assert.equal(r.waitMin, 10);
+  assert.equal(r.departure, 690);
+});
+
+test('고정 종료가 도착보다 이르면 종료 지연 경고, 출발은 도착 시각', () => {
+  const d = build([first(), second({ fixedEnd: '09:40' })]);
+  const r = d.rows[1];
+  assert.equal(r.arrival, 590);
+  assert.equal(r.lateMin, 70); // 목표 시작 08:40 (09:40 - 60분)
+  assert.equal(r.departure, 590);
+  assert.equal(r.endLateMin, 10);
+  assert.equal(d.stats.lateCount, 1);
+});
+
+test('첫 장소: 고정 시작이 없으면 day.startTime, 있으면 고정 시작 (여유/늦음 없음)', () => {
+  assert.equal(build([first()], '10:15').rows[0].arrival, 615);
+  const r = build([first({ fixedStart: '08:00' })], '10:15').rows[0];
+  assert.equal(r.arrival, 480);
+  assert.equal(r.departure, 510);
+  assert.deepEqual([r.waitMin, r.lateMin], [0, 0]);
+});
+
+test('고정 시각이 있어도 구간 계산은 앞 장소의 실제 출발을 쓴다 (택시 심야할증 시각)', () => {
+  route = { distance: 10000, duration: 1200, geometry: [], estimated: false };
+  const dayItems = (fs) => [first({ fixedStart: fs, stay: 0 }), item({ id: 'b', modeIn: 'taxi', stay: 10 })];
+  const day = build(dayItems('21:50'), '09:00');
+  const noon = build(dayItems(null), '09:00');
+  assert.ok(day.rows[1].leg.cost.total >= noon.rows[1].leg.cost.total);
+});
+
+test('normItem: 고정 시각 검증', () => {
+  const base = { name: 'x', lat: 1, lon: 2 };
+  const old = TP.store.normItem(base);
+  assert.equal(old.fixedStart, null);
+  assert.equal(old.fixedEnd, null);
+  const ok = TP.store.normItem({ ...base, fixedStart: '09:30', fixedEnd: '11:00' });
+  assert.deepEqual([ok.fixedStart, ok.fixedEnd], ['09:30', '11:00']);
+  for (const bad of ['', '9:30', '24:00', '09:60', 930, null, 'abc']) {
+    const n = TP.store.normItem({ ...base, fixedStart: bad, fixedEnd: bad });
+    assert.deepEqual([n.fixedStart, n.fixedEnd], [null, null]);
+  }
+  // 종료 <= 시작이면 종료를 버린다
+  assert.equal(TP.store.normItem({ ...base, fixedStart: '10:00', fixedEnd: '10:00' }).fixedEnd, null);
+  assert.equal(TP.store.normItem({ ...base, fixedStart: '10:00', fixedEnd: '09:00' }).fixedEnd, null);
+  assert.equal(TP.store.normItem({ ...base, fixedStart: '10:00', fixedEnd: '09:00' }).fixedStart, '10:00');
+  // 시작 없이 종료만 있으면 그대로
+  assert.equal(TP.store.normItem({ ...base, fixedEnd: '09:00' }).fixedEnd, '09:00');
+});

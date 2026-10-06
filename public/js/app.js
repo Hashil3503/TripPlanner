@@ -172,7 +172,6 @@
     const i = S.state.dayIndex;
     $('#dayLabel').textContent = `${i + 1}일차`;
     $('#dayDate').textContent = F.fmtDate(F.dayDate(trip(), i));
-    if (document.activeElement !== $('#startTime')) $('#startTime').value = day().startTime;
     if (document.activeElement !== $('#peopleInput')) $('#peopleInput').value = settings().people;
     $('#showAll').checked = S.state.showAll;
     $('#btnDeleteDay').hidden = trip().days.length <= 1;
@@ -192,10 +191,19 @@
 
   function buildItem(row, idx, dm) {
     const item = row.item;
-    const stay = Number(item.stay) || 0;
-    const timeText = stay > 0
-      ? `${F.fmtTime(row.arrival)} – ${F.fmtTime(row.departure)} · ${stay}분 체류`
-      : `${F.fmtTime(row.arrival)} 도착 · 체류 없음`;
+    const stay = row.departure - row.arrival; // 종료 시각을 고정하면 체류 시간은 시각 차이로 정해진다
+    const pin = (fixed) => (fixed ? [icon('lock', 'fixed-ico')] : []);
+    const timeParts = stay > 0
+      ? [el('span', { class: item.fixedStart ? 'fixed' : '' }, [...pin(item.fixedStart), F.fmtTime(row.arrival)]), ' – ',
+        el('span', { class: item.fixedEnd ? 'fixed' : '' }, [...pin(item.fixedEnd), F.fmtTime(row.departure)]), ` · ${stay}분 체류`]
+      : [el('span', { class: item.fixedStart ? 'fixed' : '' }, [...pin(item.fixedStart), F.fmtTime(row.arrival)]), ' 도착 · 체류 없음'];
+    const gapNote = row.waitMin > 0
+      ? el('div', { class: 'item-gap wait' }, [icon('clock'), `여유 ${row.waitMin}분 (도착 예정 ${F.fmtTime(row.est)})`])
+      : row.endLateMin > 0 // 종료 시각까지 지난 경우가 더 심각하므로 먼저 표시
+        ? el('div', { class: 'item-gap late' }, [icon('alert'), `종료 시각보다 ${row.endLateMin}분 늦게 도착해요 (도착 예정 ${F.fmtTime(row.est)})`])
+        : row.lateMin > 0
+          ? el('div', { class: 'item-gap late' }, [icon('alert'), `${row.lateMin}분 늦음 (도착 예정 ${F.fmtTime(row.est)})`])
+          : null;
 
     const costChips = [];
     if (item.cost > 0) costChips.push(el('span', { class: 'cost-chip' }, [icon('ticket'), `입장/기타 ${won(item.cost)}${settings().people > 1 ? '/인' : ''}`]));
@@ -217,10 +225,11 @@
         el('div', { class: 'item-title' }, [UI.catIcon(item.category), el('span', { class: 'name', text: item.name })]),
         el('div', { class: 'item-times' + (row.late ? ' late' : '') }, [
           icon(row.late ? 'alert' : 'clock'),
-          el('span', { text: timeText }),
+          el('span', { class: 'times-text' }, timeParts),
         ]),
         item.memo ? el('div', { class: 'item-memo', text: item.memo }) : null,
         costChips.length ? el('div', { class: 'item-costs' }, costChips) : null,
+        gapNote,
       ]),
       el('div', { class: 'item-actions' }, [
         el('button', { type: 'button', class: 'icon-btn sm', title: '수정', 'aria-label': `${item.name} 수정`, onclick: (e) => { e.stopPropagation(); openItemDialog(item.id); } }, icon('pencil')),
@@ -539,6 +548,8 @@
     const t = model.totals;
     const rows = BAR_ROWS.map((r) => ({ ...r, value: r.id === 'extra' ? t.extra : t.byMode[r.id] }));
     const max = Math.max(...rows.map((r) => r.value), 1);
+    if (s.waitMin > 0) dayKids.push(el('p', { class: 'summary-note' }, [icon('clock'), `여유 시간 합계 ${F.fmtDuration(s.waitMin)}`]));
+    if (s.lateCount > 0) dayKids.push(el('p', { class: 'warn-box' }, [icon('alert'), el('span', { text: `고정 시각에 늦는 장소가 ${s.lateCount}곳 있어요. 순서나 체류 시간을 조정해 보세요.` })]));
 
     const bars = rows.filter((r) => r.value > 0).map((r) =>
       el('div', { class: 'bar-row' }, [
@@ -924,6 +935,15 @@
       const date = F.fmtDate(F.dayDate(trip(), i));
       return el('option', { value: String(i), text: `${i + 1}일차${date ? ' · ' + date : ''}`, selected: i === S.state.dayIndex });
     }));
+    $('#itemStay').disabled = false; // 이전에 연 장소의 상태를 지운다
+    delete $('#itemStay').dataset.saved;
+    $('#itemFixedStart').value = it.fixedStart || '';
+    $('#itemFixedEnd').value = it.fixedEnd || '';
+    const first = day().items[0] === it;
+    const hint = '시작·종료·체류 중 두 개를 정하면 나머지는 자동으로 계산해요. 정한 시작보다 일찍 도착하면 그 시각까지 기다려요.';
+    $('#itemTimeHint').textContent = first && !it.fixedStart && !it.fixedEnd ? `시각을 비우면 ${day().startTime}(자동)에 시작해요. ${hint}` : hint;
+    showItemError('');
+    syncItemTimeFields();
     $('#itemDay').value = String(S.state.dayIndex);
     $('#itemDialog').showModal();
   }
@@ -935,11 +955,36 @@
       const v = Number($(id).value);
       return isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
     };
+  function showItemError(msg) {
+    const p = $('#itemError');
+    p.textContent = msg;
+    p.hidden = !msg;
+  }
+
+  /** 시작·종료·체류 중 두 개를 정하면 나머지는 계산된다. 시작·종료를 모두 정하면 체류는 그 차이로 보여주고 입력을 막는다 */
+  function syncItemTimeFields() {
+    const stay = $('#itemStay');
+    const fs = $('#itemFixedStart').value;
+    const fe = $('#itemFixedEnd').value;
+    const both = !!(fs && fe);
+    if (both && !stay.disabled) stay.dataset.saved = stay.value; // 시각을 지우면 원래 체류 시간으로 되돌린다
+    if (!both && stay.disabled && stay.dataset.saved != null) stay.value = stay.dataset.saved;
+    if (both && fe > fs) stay.value = F.parseTime(fe) - F.parseTime(fs);
+    stay.disabled = both;
+    stay.title = both ? '시작·종료 시각을 정해서 체류 시간은 그 차이로 계산돼요' : '';
+    showItemError('');
+  }
+
     it.name = $('#itemName').value.trim().slice(0, 100) || '이름 없는 장소';
     it.lat = nn('#itemLat', it.lat, -90, 90);
     it.lon = nn('#itemLon', it.lon, -180, 180);
+    const fs = $('#itemFixedStart').value || null;
+    const fe = $('#itemFixedEnd').value || null;
+    if (fs && fe && fe <= fs) return showItemError('종료 시각은 시작 시각보다 늦어야 해요.');
     it.category = $('#itemCat').value;
-    it.stay = Math.round(nn('#itemStay', 60, 0, 1440));
+    if (!(fs && fe)) it.stay = Math.round(nn('#itemStay', 60, 0, 1440)); // 둘 다 정하면 체류는 시각 차이로 계산되므로 기존 값을 보존
+    it.fixedStart = fs;
+    it.fixedEnd = fe;
     it.cost = Math.round(nn('#itemCost', 0, 0, 1e9));
     it.parking = Math.round(nn('#itemParking', 0, 0, 1e9));
     it.memo = $('#itemMemo').value.slice(0, 500);
@@ -1374,11 +1419,8 @@
     $('#btnLegsToggle').addEventListener('click', (e) => setAllLegs(e.currentTarget.dataset.action === 'collapse'));
     $('#btnRetry').addEventListener('click', () => { TP.routing.clearFailures(); renderAll(); });
 
-    $('#startTime').addEventListener('change', (e) => {
-      day().startTime = e.target.value || '09:00';
-      S.save();
-      renderAll();
-    });
+    $('#itemFixedEnd').addEventListener('input', syncItemTimeFields);
+    $('#itemFixedStart').addEventListener('input', syncItemTimeFields);
     $('#peopleInput').addEventListener('change', (e) => {
       settings().people = Math.min(99, Math.max(1, Math.round(Number(e.target.value) || 1)));
       S.save();
