@@ -271,7 +271,7 @@
     return n;
   }
 
-  /** 현재 여행. 여행이 하나도 없으면 null (홈 화면) */
+  /** 현재 여행. 여행이 하나도 없으면 null (메인 화면의 빈 상태) */
   const currentTrip = () => state.trips.find((t) => t.id === state.currentTripId) || state.trips[0] || null;
   function clampDay() {
     const t = currentTrip();
@@ -293,9 +293,24 @@
     p
   );
 
+  /** 여행 복제: 여행/일차/장소 모두 새 id를 받는 깊은 복사. 이름은 '<이름> (사본)' (80자 제한) */
+  function duplicateTrip(src) {
+    const copy = JSON.parse(JSON.stringify(src));
+    const suffix = ' (사본)';
+    copy.id = uid();
+    copy.name = String(copy.name || '여행').slice(0, 80 - suffix.length) + suffix;
+    for (const d of copy.days || []) {
+      d.id = uid();
+      for (const it of d.items || []) it.id = uid();
+    }
+    return copy;
+  }
+
   // ---- 내보내기 / 가져오기 ----
-  function exportJSON() {
-    return JSON.stringify({ app: 'TripPlanner', version: 1, exportedAt: new Date().toISOString(), trips: state.trips, settings: state.settings }, null, 2);
+  /** tripId를 주면 그 여행만, 없으면 모든 여행을 내보낸다 */
+  function exportJSON(tripId) {
+    const trips = tripId ? state.trips.filter((t) => t.id === tripId) : state.trips;
+    return JSON.stringify({ app: 'TripPlanner', version: 1, exportedAt: new Date().toISOString(), trips, settings: state.settings }, null, 2);
   }
 
   /** 가져오기: 유효성 검사 후 기존 여행에 추가한다. 추가된 여행 수를 반환. */
@@ -321,5 +336,5 @@
     state.settings = mergeSettings(TP.fare.DEFAULT_CONFIG, null);
   }
 
-  TP.store = { normItem, state, hooks, load, useUserCache, clearUserCache, loadFromServer, normServerTrip, isSample, isPlaceholder, MAX_DAYS, todayYmd, addDays, daySpan, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, exportJSON, importJSON, resetSettings, uid };
+  TP.store = { normItem, state, hooks, load, useUserCache, clearUserCache, loadFromServer, normServerTrip, isSample, isPlaceholder, MAX_DAYS, todayYmd, addDays, daySpan, save, saveNow, currentTrip, currentDay, clampDay, newTrip, newDay, newItem, duplicateTrip, exportJSON, importJSON, resetSettings, uid };
 })();

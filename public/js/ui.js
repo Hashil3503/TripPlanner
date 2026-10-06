@@ -199,7 +199,13 @@
       if (returnFocus) btn.focus();
     }
 
-    const api = { btn, panel, open, close, isOpen, place };
+    // 동적으로 만든 메뉴(카드 목록 등)가 다시 그려질 때 등록을 풀어 쌓이지 않게 한다
+    const destroy = () => {
+      close();
+      const i = menus.indexOf(api);
+      if (i >= 0) menus.splice(i, 1);
+    };
+    const api = { btn, panel, open, close, isOpen, place, destroy };
     menus.push(api);
 
     btn.addEventListener('click', (e) => {
