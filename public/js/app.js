@@ -39,6 +39,11 @@
   const inflight = new Set(); // 경로 조회 중인 구간 key
   let editingItemId = null;
   let tripDialogMode = 'new';
+  let editingTripId = null; // 여행 수정 다이얼로그가 가리키는 여행 (메인 카드에서는 현재 여행이 아닐 수 있다)
+  let view = null; // 현재 화면: 'main'(내 여행) | 'trip'(여행 편집) | null(시작 전)
+  let shownTripId = null; // 여행 화면에 열린 여행
+  let authReady = false; // 서버 세션 확인이 끝났는지: 그 전에는 없는 여행 주소를 메인으로 바꾸지 않는다
+  let mapStarted = false;
 
   // ---- 이동 구간 접기/펼치기 ----
   // 전체 기본값은 localStorage, 구간별 예외는 이번 방문 동안만 메모리에 둔다 (키: 여행 id + 도착 장소 id)
@@ -73,22 +78,19 @@
   // =====================================================================
   function renderAll(opts) {
     opts = opts || {};
-    S.clampDay();
-    if (focusedLeg && focusedLegDay !== S.state.dayIndex) focusedLeg = null;
-    const empty = !trip();
-    $('#panel').classList.toggle('is-home', empty);
-    $('.layout').classList.toggle('is-home', empty);
-    $('#homeView').hidden = !empty;
-    if (empty) {
-      // 여행이 하나도 없는 홈 화면: 일정 관련 화면은 그리지 않고 지도만 기본 상태로 둔다
-      model = null;
-      selectedId = null;
-      renderTripSelect();
-      renderMap(false);
-      updateStatus();
+    if (view !== 'trip') {
+      renderMain(); // 메인 화면에서는 지도·일정을 그리지 않는다
       return;
     }
+    if (!trip()) {
+      applyRoute({ force: true }); // 여행 화면인데 여행이 없어짐 -> 메인으로
+      return;
+    }
+    S.clampDay();
+    if (focusedLeg && focusedLegDay !== S.state.dayIndex) focusedLeg = null;
     model = P.buildTrip(trip(), settings());
+    $('#tripHeading').textContent = `${trip().name} 일정 편집`;
+    document.title = `${trip().name} - 여행 플래너`;
     renderTripSelect();
     renderDayTabs();
     renderToolbar();
@@ -106,7 +108,7 @@
       return;
     }
     cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(() => renderAll());
+    rafId = requestAnimationFrame(() => { if (view === 'trip') renderAll(); }); // 메인 화면으로 나갔으면 그릴 필요 없다
   }
 
   /** 여행 선택 드롭다운: 버튼에 현재 여행 이름, 메뉴에 여행 목록 */
@@ -133,13 +135,156 @@
     ));
   }
 
+  /** 헤더 여행 드롭다운: 주소를 바꾸면 라우터가 그 여행을 연다 */
   function selectTrip(id) {
     if (!trip() || id === trip().id) return;
-    S.state.currentTripId = id;
-    S.state.dayIndex = 0;
-    selectedId = null;
+    navigate(TP.trips.tripHash(id));
+  }
+
+  // =====================================================================
+  // 화면 전환 (해시 라우트): '#/' 메인(내 여행), '#/trip/<id>' 여행 편집
+  // =====================================================================
+  /** 주소를 바꿔 화면을 옮긴다. 이미 그 주소면 다시 그리기만 한다. replace: 뒤로 가기 기록을 남기지 않는다 */
+  function navigate(hash, replace) {
+    if (TP.trips.canonicalHash(location.hash) === hash) {
+      applyRoute({ force: true });
+    } else if (replace) {
+      history.replaceState(null, '', hash);
+      applyRoute({ force: true });
+    } else {
+      location.hash = hash; // hashchange가 applyRoute를 부른다
+    }
+  }
+
+  function setView(v) {
+    view = v;
+    document.body.dataset.view = v;
+    $('#mainView').hidden = v !== 'main';
+    $('#tripView').hidden = v !== 'trip';
+    UI.closeMenus();
+  }
+
+  /** 지도는 여행 화면에 처음 들어갈 때 만든다 (메인만 쓰는 방문에서는 카카오 SDK도 불러오지 않는다) */
+  function ensureMap() {
+    if (mapStarted) return;
+    mapStarted = true;
+    TP.map.init('map', {
+      onSelect: (id, dayIndex) => {
+        if (dayIndex !== S.state.dayIndex) {
+          S.state.dayIndex = dayIndex;
+          S.save();
+          renderAll();
+        }
+        selectItem(id, { scroll: true, pan: true, popup: true });
+      },
+      onAddPlace: addPlace,
+      onLegSelect: focusLeg,
+      onMapBlank: () => setFocusedLeg(null),
+    });
+  }
+
+  /** 라우트 제목으로 포커스를 옮긴다 (화면 전환을 스크린리더/키보드 사용자에게 알린다) */
+  function focusHeading() {
+    const h = view === 'trip' ? $('#tripHeading') : S.state.trips.length ? $('#mainTitle') : $('#homeTitle');
+    if (h) h.focus({ preventScroll: true });
+  }
+
+  /** 현재 주소를 해석해 화면을 맞춘다. 없는 여행 주소(삭제됨/다른 계정)와 여행 0개는 메인. force: 같은 화면이어도 다시 그린다 */
+  function applyRoute(opts) {
+    opts = opts || {};
+    const r = TP.trips.parseRoute(location.hash);
+    const t = r.name === 'trip' ? S.state.trips.find((x) => x.id === r.id) || null : null;
+    // 계정 확인 전에는 주소를 건드리지 않는다 (로그인 사용자의 여행이 곧 불러와질 수 있다)
+    if (r.name === 'trip' && !t && authReady) history.replaceState(null, '', TP.trips.MAIN_HASH);
+    const target = t ? 'trip' : 'main';
+    const viewChanged = view !== target;
+    const tripChanged = target === 'trip' && shownTripId !== t.id;
+    if (!viewChanged && !tripChanged && !opts.force) return;
+    const first = view === null;
+    if (target === 'trip') {
+      if (S.state.currentTripId !== t.id) {
+        S.state.currentTripId = t.id;
+        S.state.dayIndex = 0;
+        S.save();
+      }
+      if (tripChanged) selectedId = null;
+      shownTripId = t.id;
+      setView('trip');
+      ensureMap();
+      renderAll({ fit: viewChanged || tripChanged }); // 숨겨져 있던 지도는 보이게 된 뒤에 맞춘다
+    } else {
+      shownTripId = null;
+      setView('main');
+      renderAll();
+    }
+    if (!first && (viewChanged || tripChanged)) focusHeading();
+  }
+
+  // ---- 메인 화면 ----
+  const tripColor = (id) => {
+    let h = 0;
+    for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return P.DAY_COLORS[h % P.DAY_COLORS.length];
+  };
+  let cardMenus = []; // 다시 그릴 때 등록을 풀어 줄 카드 메뉴들
+
+  function renderMain() {
+    const trips = S.state.trips;
+    const empty = trips.length === 0;
+    $('#mainList').hidden = empty;
+    $('#homeView').hidden = !empty;
+    $('#mainCount').textContent = `총 ${trips.length}개`;
+    document.title = '내 여행 - 여행 플래너';
+    for (const m of cardMenus) m.destroy();
+    cardMenus = [];
+    $('#tripGrid').replaceChildren(...trips.map(buildTripCard));
+  }
+
+  function buildTripCard(t, idx) {
+    // 합계는 캐시된 경로만으로 계산한다 (메인 화면은 경로 조회 요청을 보내지 않는다). 조회 전인 구간이 있으면 비용은 생략
+    let totals = null;
+    try {
+      totals = P.buildTrip(t, settings()).totals;
+    } catch (e) {
+      totals = null;
+    }
+    const cost = TP.trips.costText(totals);
+    const count = TP.trips.placeCount(t);
+    const dates = TP.trips.dateRangeText(t);
+    const menuId = 'tripCardMenu' + idx;
+    const btn = el('button', { type: 'button', class: 'icon-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': menuId, 'aria-label': `${t.name} 메뉴`, title: '여행 메뉴' }, icon('more'));
+    const item = (ico, label, fn, cls) => el('button', { type: 'button', class: 'menu-item' + (cls ? ' ' + cls : ''), role: 'menuitem', onclick: fn }, [icon(ico), label]);
+    const panel = el('div', { class: 'menu', id: menuId, role: 'menu', 'aria-label': `${t.name} 메뉴`, hidden: true }, [
+      item('pencil', '이름·날짜 수정', () => openTripDialog('edit', t.id)),
+      item('copy', '복제', () => duplicateTripAction(t.id)),
+      item('download', '내보내기', () => exportFile(t.id)),
+      el('div', { class: 'menu-sep', role: 'separator' }),
+      item('trash', '삭제', () => deleteTrip(t.id), 'danger'),
+    ]);
+    cardMenus.push(UI.menu(btn, panel, { align: 'end' }));
+    return el('li', { class: 'trip-card', style: `--card:${tripColor(t.id)}`, dataset: { id: t.id } }, [
+      el('h3', { class: 'tc-name' }, el('a', { class: 'tc-link', href: TP.trips.tripHash(t.id), 'aria-label': `${t.name} 열기, ${dates}, 장소 ${count}곳`, text: t.name })),
+      el('p', { class: 'tc-date' }, [icon('calendar'), dates]),
+      el('p', { class: 'tc-places', text: TP.trips.placePreview(t) }),
+      el('p', { class: 'tc-meta' }, [
+        el('span', {}, ['장소 ', el('b', { text: String(count) }), '곳']),
+        cost ? el('span', { class: 'tc-cost', title: totals.unknownCostLegs ? '요금을 알 수 없는 구간은 합계에서 뺐어요' : '', text: cost + (totals.unknownCostLegs ? ' + 미정' : '') }) : null,
+      ]),
+      el('div', { class: 'menu-wrap tc-more' }, [btn, panel]),
+    ]);
+  }
+
+  /** 카드 메뉴의 복제: 원본 바로 뒤에 새 id로 복사본을 만들고 메인에 머문다 */
+  function duplicateTripAction(id) {
+    const i = S.state.trips.findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const copy = S.duplicateTrip(S.state.trips[i]);
+    S.state.trips.splice(i + 1, 0, copy);
     S.save();
-    renderAll({ fit: true });
+    renderAll();
+    toast(`"${copy.name}" 을(를) 만들었어요`);
+    const link = $(`#tripGrid [data-id="${CSS.escape(copy.id)}"] .tc-link`);
+    if (link) link.focus();
   }
 
   function renderDayTabs() {
@@ -879,10 +1024,11 @@
   }
 
   // ---- 다이얼로그 ----
-  function openTripDialog(mode) {
-    const t = mode === 'new' ? null : trip();
+  function openTripDialog(mode, id) {
+    const t = mode === 'new' ? null : S.state.trips.find((x) => x.id === (id || (trip() && trip().id))) || null;
     if (mode !== 'new' && !t) return;
     tripDialogMode = mode;
+    editingTripId = t ? t.id : null;
     // 종료일은 저장하지 않고 시작일 + 일수 - 1 로 구한다 (옛 여행처럼 시작일이 없으면 둘 다 비워 두고 입력받는다)
     const start = t ? t.startDate : S.todayYmd();
     $('#tripDialogTitle').textContent = t ? '여행 수정' : '새 여행';
@@ -930,13 +1076,16 @@
     if (err) return showTripError(err);
     showTripError('');
     const days = S.daySpan(start, end);
+    let newId = null;
     if (tripDialogMode === 'new') {
       const t = S.newTrip(name, start, days);
       S.state.trips.push(t);
       S.state.currentTripId = t.id;
       S.state.dayIndex = 0;
+      newId = t.id;
     } else {
-      const t = trip();
+      const t = S.state.trips.find((x) => x.id === editingTripId);
+      if (!t) return $('#tripDialog').close();
       if (days < t.days.length) {
         const lost = t.days.slice(days).reduce((n, d) => n + d.items.length, 0);
         if (lost && !confirm(`여행 기간을 줄이면 ${days + 1}일차 이후의 일정 ${lost}개가 삭제됩니다. 계속할까요?`)) return;
@@ -949,21 +1098,26 @@
     selectedId = null;
     S.save();
     $('#tripDialog').close();
-    renderAll({ fit: true });
+    if (newId) navigate(TP.trips.tripHash(newId)); // 새 여행은 바로 편집 화면으로
+    else renderAll({ fit: view === 'trip' });
   }
 
-  function deleteTrip() {
-    const t = trip();
+  /** 여행 삭제 (id 없으면 현재 여행). 편집 화면에서 지웠으면 메인으로 나간다 (어떤 여행도 자동으로 열지 않는다) */
+  function deleteTrip(id) {
+    const t = S.state.trips.find((x) => x.id === (id || (trip() && trip().id)));
     if (!t || !confirm(`"${t.name}" 여행을 삭제할까요? 되돌릴 수 없습니다.`)) return;
     S.state.trips = S.state.trips.filter((x) => x.id !== t.id);
-    S.state.currentTripId = S.state.trips.length ? S.state.trips[0].id : null; // 마지막 여행이면 홈 화면
-    S.state.dayIndex = 0;
+    if (S.state.currentTripId === t.id) {
+      S.state.currentTripId = S.state.trips.length ? S.state.trips[0].id : null;
+      S.state.dayIndex = 0;
+    }
     selectedId = null;
     S.save();
-    renderAll({ fit: true });
+    if (view === 'trip' && shownTripId === t.id) navigate(TP.trips.MAIN_HASH, true);
+    else renderAll();
   }
 
-  /** 홈 화면의 '샘플 여행 둘러보기': 서울 1박 2일 샘플을 여행 목록에 추가한다 */
+  /** '샘플 여행': 서울 1박 2일 샘플을 여행 목록에 추가하고 그 여행을 연다 */
   function createSampleTrip() {
     const t = TP.sample.create();
     S.state.trips.push(t);
@@ -971,7 +1125,7 @@
     S.state.dayIndex = 0;
     selectedId = null;
     S.save();
-    renderAll({ fit: true });
+    navigate(TP.trips.tripHash(t.id));
     toast('샘플 여행을 만들었어요. 마음대로 고쳐 보세요');
   }
 
@@ -1243,10 +1397,14 @@
   }
 
   // ---- 내보내기 / 가져오기 ----
-  function exportFile() {
+  /** tripId를 주면 그 여행만, 없으면 모든 여행을 내보낸다 */
+  function exportFile(tripId) {
     if (!S.state.trips.length) return toast('내보낼 여행이 없어요');
-    const blob = new Blob([S.exportJSON()], { type: 'application/json' });
-    const a = el('a', { href: URL.createObjectURL(blob), download: `trip-planner-${S.todayYmd()}.json` });
+    const one = typeof tripId === 'string' ? S.state.trips.find((x) => x.id === tripId) : null;
+    if (typeof tripId === 'string' && !one) return;
+    const blob = new Blob([S.exportJSON(one && one.id)], { type: 'application/json' });
+    const name = one ? one.name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) : '';
+    const a = el('a', { href: URL.createObjectURL(blob), download: `trip-planner-${name ? name + '-' : ''}${S.todayYmd()}.json` });
     document.body.append(a);
     a.click();
     a.remove();
@@ -1261,7 +1419,8 @@
       try {
         const n = S.importJSON(String(reader.result));
         selectedId = null;
-        renderAll({ fit: true });
+        // 하나면 바로 열고, 여러 개면 메인에서 목록으로 보여준다
+        navigate(n === 1 ? TP.trips.tripHash(S.state.currentTripId) : TP.trips.MAIN_HASH);
         toast(`여행 ${n}개를 가져왔어요`);
       } catch (e) {
         toast(e.message || '가져오기에 실패했어요');
@@ -1442,7 +1601,7 @@
       TP.map.clearExtra();
       renderAuth();
       renderSaveStatus(TP.auth.status());
-      renderAll({ fit: true });
+      applyRoute({ force: true }); // 새 여행 목록에 맞게 주소를 다시 확인 (없는 여행이면 메인)
     });
     renderAuth();
     renderSaveStatus(TP.auth.status());
@@ -1467,8 +1626,11 @@
 
     $('#btnNewTrip').addEventListener('click', () => openTripDialog('new'));
     $('#btnEditTrip').addEventListener('click', () => openTripDialog('edit'));
-    $('#btnDeleteTrip').addEventListener('click', deleteTrip);
+    $('#btnDeleteTrip').addEventListener('click', () => deleteTrip());
     $('#btnHomeNew').addEventListener('click', () => openTripDialog('new'));
+    $('#btnMainNew').addEventListener('click', () => openTripDialog('new'));
+    $('#btnMainSample').addEventListener('click', createSampleTrip);
+    $('#btnMainImport').addEventListener('click', () => $('#fileImport').click());
     $('#btnHomeSample').addEventListener('click', createSampleTrip);
     $('#btnHomeImport').addEventListener('click', () => $('#fileImport').click());
     $('#btnDeleteDay').addEventListener('click', deleteDay);
@@ -1521,7 +1683,7 @@
       buildSettingsFields();
     });
 
-    $('#btnExport').addEventListener('click', exportFile);
+    $('#btnExport').addEventListener('click', () => exportFile());
     $('#btnImport').addEventListener('click', () => $('#fileImport').click());
     $('#fileImport').addEventListener('change', (e) => {
       importFile(e.target.files[0]);
@@ -1561,21 +1723,13 @@
     TP.auth.restore(); // 마지막 로그인 사용자의 캐시가 있으면 서버 확인 전에 먼저 표시
     bind();
     initSortable();
-    TP.map.init('map', {
-      onSelect: (id, dayIndex) => {
-        if (dayIndex !== S.state.dayIndex) {
-          S.state.dayIndex = dayIndex;
-          S.save();
-          renderAll();
-        }
-        selectItem(id, { scroll: true, pan: true, popup: true });
-      },
-      onAddPlace: addPlace,
-      onLegSelect: focusLeg,
-      onMapBlank: () => setFocusedLeg(null),
+    window.addEventListener('hashchange', () => applyRoute());
+    applyRoute(); // 첫 화면: 주소에 맞는 여행 화면, 아니면 메인 (지도는 여행 화면에 들어갈 때 만든다)
+    // 서버 세션 확인 + 서버 데이터 불러오기 (게스트면 아무 일도 없음). 끝나면 주소가 올바른지 한 번 더 확인한다
+    TP.auth.init().finally(() => {
+      authReady = true;
+      applyRoute();
     });
-    renderAll({ fit: true });
-    TP.auth.init(); // 서버 세션 확인 + 서버 데이터 불러오기 (게스트면 아무 일도 없음)
   }
 
   document.addEventListener('DOMContentLoaded', start);

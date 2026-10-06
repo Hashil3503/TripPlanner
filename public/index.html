@@ -67,16 +67,22 @@
       <symbol id="i-bed" viewBox="0 0 24 24"><path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/></symbol>
       <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/></symbol>
       <symbol id="i-bag" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></symbol>
+      <symbol id="i-layout-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
     </defs>
   </svg>
 
   <header class="topbar">
     <h1 class="brand">
-      <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-compass"/></svg></span>
-      <span class="brand-name">여행 플래너</span>
+      <a class="brand-link" href="#/" title="내 여행 (메인 화면)">
+        <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-compass"/></svg></span>
+        <span class="brand-name">여행 플래너</span>
+      </a>
     </h1>
+    <a class="btn ghost small my-trips trip-only" id="btnMyTrips" href="#/" title="내 여행 목록으로" aria-label="내 여행 목록으로"><svg class="icon" aria-hidden="true"><use href="#i-layout-grid"/></svg><span>내 여행</span></a>
 
-    <div class="menu-wrap trip-switch">
+    <div class="menu-wrap trip-switch trip-only">
       <button class="trip-btn" id="tripMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tripMenu" title="여행 선택">
         <span class="trip-btn-label" id="tripLabel"></span>
         <svg class="icon chev" aria-hidden="true"><use href="#i-chevron-down"/></svg>
@@ -84,7 +90,7 @@
       <div class="menu" id="tripMenu" role="menu" aria-label="여행 선택" hidden></div>
     </div>
 
-    <div class="menu-wrap">
+    <div class="menu-wrap trip-only">
       <button class="icon-btn" id="tripMoreBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="tripMoreMenu" aria-label="여행 메뉴" title="여행 메뉴">
         <svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>
       </button>
@@ -158,23 +164,28 @@
     <button class="banner-close" id="btnBannerClose" type="button" title="닫기" aria-label="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
 
-  <main class="layout">
-    <div class="side side-left" id="sideLeft">
-    <aside class="panel" id="panel" aria-label="일정">
-      <section class="search" id="searchBar" aria-label="장소 검색">
-        <div class="search-box">
-          <svg class="icon search-ico" aria-hidden="true"><use href="#i-search"/></svg>
-          <input id="searchInput" type="search" placeholder="장소 검색 (예: 남산타워, 해운대)" autocomplete="off" aria-label="장소 검색">
-          <button class="btn primary small" id="btnSearch" type="button">검색</button>
+  <!-- 메인 화면: 내 여행 목록(갤러리). 여행이 없으면 빈 상태 안내 -->
+  <main class="main-view" id="mainView" hidden>
+    <div class="main-inner">
+      <section class="main-list" id="mainList" aria-labelledby="mainTitle">
+        <div class="main-head">
+          <div class="main-title">
+            <h2 id="mainTitle" tabindex="-1">내 여행</h2>
+            <span class="muted" id="mainCount"></span>
+          </div>
+          <div class="main-actions">
+            <button class="btn primary" id="btnMainNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>새 여행 만들기</button>
+            <button class="btn" id="btnMainSample" type="button"><svg class="icon" aria-hidden="true"><use href="#i-map-pin"/></svg>샘플 여행</button>
+            <button class="btn" id="btnMainImport" type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>JSON 가져오기</button>
+          </div>
         </div>
-        <p class="hint">지도를 클릭해도 그 지점을 일정에 추가할 수 있어요.</p>
-        <ul id="searchResults" class="search-results" hidden></ul>
+        <ul class="trip-grid" id="tripGrid" aria-label="여행 목록"></ul>
       </section>
 
-      <!-- 여행이 하나도 없을 때의 홈 화면 (이 화면에서는 패널의 다른 구역을 숨긴다) -->
+      <!-- 여행이 하나도 없을 때의 빈 상태 -->
       <section class="home" id="homeView" aria-labelledby="homeTitle" hidden>
         <span class="home-mark" aria-hidden="true"><svg class="icon"><use href="#i-compass"/></svg></span>
-        <h2 id="homeTitle">여행 일정을 만들어 볼까요?</h2>
+        <h2 id="homeTitle" tabindex="-1">여행 일정을 만들어 볼까요?</h2>
         <p class="home-lead">지도에서 장소를 고르고 일정을 짜면 이동 시간·교통비를 자동으로 계산해요.</p>
         <div class="home-actions">
           <button class="btn primary" id="btnHomeNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>새 여행 만들기</button>
@@ -187,6 +198,23 @@
           <li><span class="home-step-num" aria-hidden="true">3</span>이동수단별 시간과 비용을 한눈에 확인해요</li>
         </ol>
         <p class="home-note" id="homeGuestNote" hidden>로그인하면 만든 여행이 계정에 저장돼요. <button class="link" id="btnHomeLogin" type="button">로그인</button></p>
+      </section>
+    </div>
+  </main>
+
+  <!-- 여행 화면: 지도 + 일정/요약 사이드바 -->
+  <main class="layout" id="tripView" hidden>
+    <h2 class="sr-only" id="tripHeading" tabindex="-1"></h2>
+    <div class="side side-left" id="sideLeft">
+    <aside class="panel" id="panel" aria-label="일정">
+      <section class="search" id="searchBar" aria-label="장소 검색">
+        <div class="search-box">
+          <svg class="icon search-ico" aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="searchInput" type="search" placeholder="장소 검색 (예: 남산타워, 해운대)" autocomplete="off" aria-label="장소 검색">
+          <button class="btn primary small" id="btnSearch" type="button">검색</button>
+        </div>
+        <p class="hint">지도를 클릭해도 그 지점을 일정에 추가할 수 있어요.</p>
+        <ul id="searchResults" class="search-results" hidden></ul>
       </section>
 
       <nav class="day-tabs" id="dayTabs" role="tablist" aria-label="일차 선택"></nav>
@@ -417,6 +445,7 @@
   <script src="js/geocode.js"></script>
   <script src="js/routing.js"></script>
   <script src="js/planner.js"></script>
+  <script src="js/trips.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/map.js"></script>
   <script src="js/auth.js"></script>
