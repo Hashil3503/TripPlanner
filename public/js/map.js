@@ -17,8 +17,9 @@
   let infoOverlay = null; // 일정 마커 팝업
   let infoId = null; // 열려 있는 팝업의 일정 id
   let legTip = null; // 경로선 툴팁
+  let legClickAt = 0; // 마지막 경로선 클릭 시각 (같은 클릭의 지도 클릭 처리를 건너뛰기 위해)
 
-  const Z = { dim: 1, line: 2, pin: 10, selected: 30, preview: 40, popup: 100 };
+  const Z = { dim: 1, line: 2, focus: 5, pin: 10, selected: 30, preview: 40, popup: 100 };
 
   function h(tag, cls, text) {
     const n = document.createElement(tag);
@@ -91,6 +92,8 @@
     legTip = new kakao.maps.CustomOverlay({ content: h('div', 'leg-tip'), xAnchor: 0.5, yAnchor: 1.6, zIndex: Z.popup, clickable: false });
 
     kakao.maps.event.addListener(map, 'click', (e) => {
+      if (Date.now() - legClickAt < 300) return; // 경로선을 누른 클릭이면 위치 팝업을 띄우지 않는다
+      if (handlers.onMapBlank) handlers.onMapBlank();
       closeInfo();
       showPointPopup(e.latLng.getLat(), e.latLng.getLng());
     });
@@ -159,6 +162,12 @@
     const ico = TP.ui.modeIcon(leg.mode, 'm-' + leg.mode);
     title.append(ico, h('strong', null, mode.label));
     box.append(title);
+    // 출발 -> 도착 장소 (번호는 지도 핀과 같은 일정 순서)
+    const stop = (it) => {
+      const m = markers.get(it.id);
+      return (m ? m.point.number + '. ' : '') + it.name;
+    };
+    box.append(h('div', 'popup-sub leg-tip-route', `${stop(leg.from)} → ${stop(leg.to)}`));
     if (leg.transitReal) box.append(TP.ui.routePills(leg.transitReal.route));
     const sub = `${TP.fmt.fmtDuration(leg.durationMin)} · ${TP.fmt.fmtDist(leg.distance)} · ${leg.cost.unknown ? '요금 미정' : TP.fmt.fmtWon(leg.cost.total)}`;
     box.append(h('div', 'popup-sub num', sub));
@@ -189,6 +198,14 @@
     });
     kakao.maps.event.addListener(line, 'mousemove', (e) => legTip.setPosition(e.latLng));
     kakao.maps.event.addListener(line, 'mouseout', () => legTip.setMap(null));
+    // 경로 클릭: 사이드바에서 그 구간을 펼쳐 보여준다 (구간은 도착 장소 id로 식별)
+    kakao.maps.event.addListener(line, 'click', () => {
+      legClickAt = Date.now();
+      ++clickSeq; // 지도 클릭이 먼저 처리됐다면 진행 중인 주소 조회 팝업을 취소
+      clearExtra();
+      const m = markers.get(leg.to.id);
+      if (handlers.onLegSelect && m) handlers.onLegSelect(leg.to.id, m.group.dayIndex);
+    });
   }
 
   const STEP_STYLE = { SUBWAY: { weight: 7, style: 'solid' }, BUS: { weight: 5, style: 'solid' } };
@@ -230,7 +247,12 @@
     if (legTip) legTip.setMap(null);
   }
 
-  /** model: { groups: [{ dayIndex, color, active, points:[{item, number, arrival}], legs:[{ leg, color }] }], selectedId } */
+  /** 강조된 구간의 네온 효과: 같은 경로 아래에 넓고 옅은 구간 색 선을 겹쳐 빛나는 테두리처럼 보이게 한다 */
+  function addGlow(leg, path, color, weight, zIndex) {
+    for (const [extra, opacity] of [[18, 0.12], [11, 0.22], [5, 0.4]]) addLine(leg, path, color, weight + extra, opacity, 'solid', zIndex);
+  }
+
+  /** model: { groups: [{ dayIndex, color, active, points:[{item, number, arrival}], legs:[{ leg, color }] }], selectedId, focusedLegId } */
   function render(model) {
     if (!map) {
       pending.model = model;
@@ -245,10 +267,13 @@
       const dim = !g.active;
       // 경로: 조회 성공한 도로 경로는 실선, 대중교통(추정)/조회 실패는 점선
       for (const { leg, color } of g.legs) {
-        const z = dim ? Z.dim : Z.line;
+        const focus = !dim && leg.to.id === model.focusedLegId; // 사이드바에서 강조 중인 구간 (도착 장소 id)
+        const z = dim ? Z.dim : focus ? Z.focus : Z.line;
         if (leg.transitReal && !leg.loading) {
+          const pieces = transitPieces(leg);
+          if (focus) for (const p of pieces) addGlow(leg, p.path, color, 5, z - 0.5);
           // 카카오 대중교통 실경로: 버스/지하철은 실선(지하철이 조금 더 굵게), 도보·빈 구간은 가는 점선
-          for (const p of transitPieces(leg)) {
+          for (const p of pieces) {
             if (p.walk) addLine(leg, p.path, color, dim ? 2 : 3, dim ? 0.35 : 0.8, 'shortdot', z);
             else {
               const st = STEP_STYLE[p.type] || STEP_STYLE.BUS;
@@ -258,6 +283,7 @@
           continue;
         }
         const dashed = leg.transit || leg.estimated || leg.loading;
+        if (focus) addGlow(leg, leg.geometry, color, 5, z - 0.5);
         addLine(leg, leg.geometry, color, dim ? 3 : 5, dim ? 0.35 : 0.85, dashed ? 'dash' : 'solid', z);
       }
       for (const p of g.points) {
