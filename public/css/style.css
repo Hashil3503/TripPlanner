@@ -507,24 +507,23 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
   background: var(--day); color: var(--day-ink); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 4px var(--bg-panel);
 }
-/* 다음 구간을 접고 펴는 노드 버튼: 오른쪽 아래 작은 화살표로 상태 표시 */
-button.node { padding: 0; border: 0; font-family: inherit; cursor: pointer; transition: box-shadow 0.15s, transform 0.15s; }
-button.node:hover { box-shadow: 0 0 0 4px var(--bg-panel), 0 0 0 6px color-mix(in srgb, var(--day) 40%, transparent); }
-button.node:active { transform: scale(0.94); }
-.node-chev {
-  position: absolute; right: -5px; bottom: -5px; width: 14px; height: 14px; padding: 1px;
-  border-radius: 50%; background: var(--surface); color: var(--muted); box-shadow: 0 0 0 1px var(--border-strong);
-  transition: transform 0.2s;
+/* 타임라인 선: 구간 A→B의 선은 하나의 접기/펴기 컨트롤.
+   .leg-line(구간 행 전체 높이)과 노드 위아래 .line-seg 조각이 같은 x에 이어져 한 색으로 보이고, 호버/포커스 시 함께 굵어진다. */
+.line-seg, .leg-line { position: absolute; left: 0; width: 28px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.line-seg { z-index: 0; }
+.line-seg.in { top: 0; height: 50%; }
+.line-seg.out { top: 50%; bottom: 0; }
+.leg-line { top: 0; bottom: 0; }
+.line-seg::before, .leg-line::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 12px; width: 4px;
+  background: var(--leg, var(--day)); transition: left 0.15s, width 0.15s;
 }
-button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
-@media (prefers-reduced-motion: reduce) { button.node, .node-chev { transition: none; } }
-/* 타임라인 선: 노드 아래로 이어지고, 구간 행을 관통한다 */
-.item:not(:last-child) .stop::after, .leg::before { content: ''; position: absolute; left: 13px; width: 2px; background: color-mix(in srgb, var(--day) 45%, var(--border)); }
-/* 구간 선은 지도의 같은 구간 색과 맞춰 진하게 */
-.leg::before { left: 12px; width: 4px; background: var(--leg, var(--day)); }
-.item:not(:first-child) .stop::before { content: ''; position: absolute; top: 0; height: 50%; left: 12px; width: 4px; background: var(--prev-leg, var(--day)); } /* 들어오는 구간 선을 노드까지 */
-.item:not(:last-child) .stop::after { top: 50%; bottom: 0; left: 12px; width: 4px; background: var(--next-leg, var(--day)); } /* 다음 구간 선과 한 색으로 이어진다 */
-.leg::before { top: 0; bottom: 0; }
+.line-seg.in::before { background: var(--prev-leg, var(--day)); }
+.line-seg.out::before { background: var(--next-leg, var(--day)); }
+.line-seg.hot::before, .leg-line.hot::before { left: 10px; width: 8px; }
+.leg-line:focus-visible { outline: none; }
+.leg-line:focus-visible::before { box-shadow: 0 0 0 2px var(--bg-panel), 0 0 0 4px var(--text-2); }
+@media (prefers-reduced-motion: reduce) { .line-seg::before, .leg-line::before { transition: none; } }
 
 .item-card {
   position: relative; display: flex; align-items: flex-start; gap: 4px; padding: 12px 8px 12px 4px;
@@ -583,6 +582,8 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 /* ---- 이동 구간: 타임라인 위의 가벼운 연결 행 ---- */
 .leg { --leg-dur: 0.22s; position: relative; padding-left: 40px; }
 .leg.is-loading { opacity: 0.85; }
+.leg { cursor: pointer; border-radius: var(--radius-sm); transition: background-color 0.15s; }
+.leg.hot { background: color-mix(in srgb, var(--leg, var(--day)) 7%, transparent); } /* 누를 수 있는 구간 영역임을 살짝 표시 */
 /* 접힘/펼침: 두 패널의 높이(0fr↔1fr)와 투명도를 짧게 교차시킨다. 숨은 쪽은 visibility+inert로 포커스에서 빠진다. */
 .leg-pane {
   display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden;
@@ -598,24 +599,15 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 .leg-summary {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; margin: 4px 0; padding: 0 6px 0 8px;
   border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
-  font-size: 13px; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums;
-  transition: background-color 0.15s, color 0.15s;
+  font-size: 13px; text-align: left; font-variant-numeric: tabular-nums;
 }
-.leg-summary:hover { background: var(--surface-2); color: var(--text); }
-.leg-summary:focus-visible { outline-offset: 0; }
-.leg-swatch { flex: none; width: 4px; height: 16px; margin-left: -2px; border-radius: 2px; background: var(--leg, var(--day)); }
 .leg-summary .leg-mode-ico { width: 16px; height: 16px; }
 .leg-sum-text { min-width: 0; font-weight: 600; color: var(--text); white-space: nowrap; }
 .leg-summary .tag.loading { padding-left: 0; }
 .leg-warn { display: inline-flex; flex: none; color: var(--warn); }
 .leg-warn .icon { width: 14px; height: 14px; }
-.leg-summary .leg-chev { margin-left: auto; width: 16px; height: 16px; color: var(--muted); }
-.leg-summary:hover .leg-chev { color: var(--text); }
 .leg-info-row { display: flex; align-items: flex-start; gap: 8px; }
 .leg-info-row .leg-info { flex: 1; min-width: 0; }
-.leg-collapse { margin: -4px -4px -4px 0; }
-.leg-collapse[aria-expanded='true']:not(:hover) { background: transparent; }
-.leg-collapse .leg-chev { transform: rotate(180deg); }
 .leg-top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .leg-modes > button { height: 28px; min-width: 30px; padding: 0 7px; gap: 4px; font-size: 12px; }
 .leg-modes .icon { width: 15px; height: 15px; }
@@ -862,7 +854,6 @@ fieldset .hint { margin: 0; }
   .day-head .btn:not(.legs-toggle) span { display: none; }
   .day-head .btn:not(.legs-toggle) { width: 40px; padding: 0; }
   .leg-summary { min-height: 40px; margin: 0; }
-  .leg-collapse { margin: -6px -6px -6px 0; }
   .dialog-form label input, .dialog-form label select { height: 44px; font-size: 16px; }
   .dlg-foot .btn { height: 44px; }
   dialog { width: calc(100vw - 16px); }
@@ -878,7 +869,9 @@ fieldset .hint { margin: 0; }
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
 @media (max-width: 767px) {
-  button.node::before { content: ''; position: absolute; inset: -8px; border-radius: 50%; } /* 터치 영역 44px */
+  .line-seg, .leg-line { width: 36px; left: -4px; } /* 터치 영역 36px (선 위치는 그대로) */
+  .line-seg::before, .leg-line::before { left: 16px; }
+  .line-seg.hot::before, .leg-line.hot::before { left: 14px; }
 }
 /* 일괄 접기/펴기(좌) · 전체 일차 지도 표시(우) */
 .view-row { justify-content: space-between; }

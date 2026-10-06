@@ -187,6 +187,7 @@
     const color = colorOf(dm.dayIndex);
     list.style.setProperty('--day', color);
     list.style.setProperty('--day-ink', UI.inkOn(color));
+    bindLineHot(list);
     list.replaceChildren(...dm.rows.map((row, idx) => buildItem(row, idx, dm)));
     $('#emptyMsg').hidden = dm.rows.length > 0;
   }
@@ -240,6 +241,7 @@
     ]);
 
     // 구간 순서: 첫 장소를 뺀 모든 장소에 들어오는 구간이 있으므로 들어오는 구간은 idx - 1, 나가는 구간은 idx
+    const next = dm.rows[idx + 1];
     const last = idx === dm.rows.length - 1;
     return el('li', {
       class: 'item' + (item.id === selectedId ? ' selected' : '') + (row.late ? ' over-midnight' : ''),
@@ -247,40 +249,53 @@
       style: (idx > 0 ? `--prev-leg:${legColorOf(dm.dayIndex, idx - 1)};` : '') + (last ? '' : `--next-leg:${legColorOf(dm.dayIndex, idx)}`),
       dataset: { id: item.id },
     }, [
-      row.leg ? buildLeg(row.leg, item, legColorOf(dm.dayIndex, idx - 1)) : null,
-      el('div', { class: 'stop' }, [buildNode(idx, dm), card]),
+      row.leg ? buildLeg(row.leg, item, legColorOf(dm.dayIndex, idx - 1), idx) : null,
+      el('div', { class: 'stop' }, [
+        // 노드 위아래 타임라인 선: 눌러서 해당 구간을 접고 펴는 클릭 영역 (키보드는 구간의 .leg-line 버튼이 맡는다)
+        row.leg ? lineSeg('in', legKey(item.id)) : null,
+        next && next.leg ? lineSeg('out', legKey(next.item.id)) : null,
+        buildNode(idx),
+        card,
+      ]),
     ]);
   }
 
-  /** 타임라인 노드. 다음 장소로 가는 구간이 있으면 그 구간을 접고 펴는 버튼이 된다. */
-  function buildNode(idx, dm) {
-    const num = String(idx + 1);
-    const next = dm.rows[idx + 1];
-    if (!next || !next.leg) return el('span', { class: 'node', text: num });
-    const collapsed = isLegCollapsed(next.item.id);
-    return el('button', {
-      type: 'button',
-      class: 'node node-btn',
-      'data-node-for': legKey(next.item.id),
-      'aria-controls': 'leg-body-' + next.item.id,
-      'aria-expanded': String(!collapsed),
-      title: `${num}→${idx + 2} 이동 정보 ${collapsed ? '펼치기' : '접기'}`,
-      'aria-label': `${num}번 → ${idx + 2}번 이동 정보 ${collapsed ? '펼치기' : '접기'}`,
-      onclick: () => {
-        const legEl = document.querySelector(`#itemList .leg[data-key="${CSS.escape(legKey(next.item.id))}"]`);
-        if (legEl) toggleLeg(legEl);
-      },
-    }, [el('span', { text: num }), icon('chevron-down', 'node-chev')]);
+  /** 타임라인 노드 (표시 전용) */
+  function buildNode(idx) {
+    return el('span', { class: 'node', text: String(idx + 1) });
   }
 
-  /** 구간 상태에 맞춰 앞쪽 노드 버튼의 aria/툴팁을 갱신 */
-  function syncNode(key, collapsed) {
-    const nb = document.querySelector(`#itemList .node-btn[data-node-for="${CSS.escape(key)}"]`);
-    if (!nb) return;
-    nb.setAttribute('aria-expanded', String(!collapsed));
-    const verb = collapsed ? '펼치기' : '접기';
-    nb.title = nb.title.replace(/(펼치기|접기)$/, verb);
-    nb.setAttribute('aria-label', nb.getAttribute('aria-label').replace(/(펼치기|접기)$/, verb));
+  /** 노드 위(in)/아래(out)의 선 조각. 같은 구간의 .leg-line과 data-line-for를 공유해 함께 강조된다. */
+  function lineSeg(dir, key) {
+    return el('div', {
+      class: 'line-seg ' + dir,
+      'aria-hidden': 'true',
+      dataset: { lineFor: key },
+      onclick: () => {
+        const legEl = document.querySelector(`#itemList .leg[data-key="${CSS.escape(key)}"]`);
+        if (legEl) toggleLeg(legEl);
+      },
+    });
+  }
+
+  /** 같은 구간(A→B)의 선 조각 전체를 함께 굵게 */
+  function setLineHot(key, on) {
+    for (const n of document.querySelectorAll(`#itemList [data-line-for="${CSS.escape(key)}"]`)) n.classList.toggle('hot', on);
+  }
+
+  function bindLineHot(list) {
+    if (list.dataset.lineHot) return;
+    list.dataset.lineHot = '1';
+    const keyOf = (t) => {
+      const n = t instanceof Element ? t.closest('[data-line-for]') : null;
+      return n ? n.dataset.lineFor : null;
+    };
+    const over = (e) => { const k = keyOf(e.target); if (k && k !== keyOf(e.relatedTarget)) setLineHot(k, true); };
+    const out = (e) => { const k = keyOf(e.target); if (k && k !== keyOf(e.relatedTarget)) setLineHot(k, false); };
+    list.addEventListener('mouseover', over);
+    list.addEventListener('mouseout', out);
+    list.addEventListener('focusin', over);
+    list.addEventListener('focusout', out);
   }
 
   /** 카카오 요금 범위 표시: '2,350~3,300원' */
@@ -330,18 +345,19 @@
   /** 구간 DOM의 접힘 상태를 맞춘다: 안 보이는 쪽은 inert로 포커스/스크린리더에서 제외 */
   function applyLegDom(legEl, collapsed) {
     legEl.dataset.collapsed = String(collapsed);
-    for (const b of legEl.querySelectorAll('[data-leg-toggle]')) b.setAttribute('aria-expanded', String(!collapsed));
+    const line = legEl.querySelector('.leg-line');
+    line.setAttribute('aria-expanded', String(!collapsed));
+    const label = line.dataset.label + (collapsed ? ' 펼치기' : ' 접기') + line.dataset.sum;
+    line.title = label;
+    line.setAttribute('aria-label', label);
     legEl.querySelector('.leg-pane-min').inert = !collapsed;
     legEl.querySelector('.leg-pane-full').inert = collapsed;
-    syncNode(legEl.dataset.key, collapsed);
   }
 
   function toggleLeg(legEl) {
     const collapsed = legEl.dataset.collapsed !== 'true';
     legOverride.set(legEl.dataset.key, collapsed);
-    const hadFocus = legEl.contains(document.activeElement); // 노드에서 눌렀으면 포커스는 노드에 그대로 둔다
     applyLegDom(legEl, collapsed);
-    if (hadFocus) legEl.querySelector(collapsed ? '.leg-summary' : '.leg-collapse').focus(); // 눌렀던 버튼이 숨겨지므로 짝 버튼으로
     renderLegsToggle();
   }
 
@@ -374,7 +390,7 @@
   const INTERCITY_HINT = '카카오 대중교통은 도시 간 경로(KTX·고속버스 등)를 알려주지 않아요. 시간·요금을 직접 입력해 주세요';
   const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요';
 
-  function buildLeg(leg, item, color) {
+  function buildLeg(leg, item, color, idx) {
     const modes = MODES.map((m) => {
       const on = m.id === leg.mode;
       return el('button', {
@@ -438,24 +454,36 @@
     const summaryText = `${F.fmtDuration(leg.durationMin)} · ${legCostShort(leg)}`;
     const warnText = notes.join(', ');
 
-    const legEl = el('div', { class: 'leg' + (leg.loading ? ' is-loading' : ''), style: `--leg:${color}`, dataset: { key: legKey(item.id) } }, [
-      // 접힌 상태: 이동수단 아이콘 + 시간 · 비용 (+ 경고) + 펼침 화살표
+    // 구간 영역 전체가 토글: 선 버튼(키보드 포함)이나 빈 곳을 누르면 접고 편다. 안쪽의 다른 컨트롤과 텍스트 선택은 제외
+    const legEl = el('div', {
+      class: 'leg' + (leg.loading ? ' is-loading' : ''),
+      style: `--leg:${color}`,
+      dataset: { key: legKey(item.id), lineFor: legKey(item.id) },
+      onclick: (e) => {
+        const ctl = e.target.closest('button, a, select, input, textarea, label, dialog');
+        if (ctl && !ctl.classList.contains('leg-line')) return;
+        const sel = window.getSelection && window.getSelection();
+        if (!ctl && sel && String(sel) && e.currentTarget.contains(sel.anchorNode)) return; // 구간 안 글자를 드래그해 선택한 경우
+        toggleLeg(e.currentTarget);
+      },
+    }, [
+      // 구간 선: 이 구간을 접고 펴는 유일한 컨트롤 (노드 A 중심에서 노드 B 중심까지)
+      el('button', {
+        type: 'button',
+        class: 'leg-line',
+        'data-leg-toggle': '',
+        'aria-controls': bodyId,
+        'data-line-for': legKey(item.id),
+        'data-label': `${idx}→${idx + 1} 이동 정보`,
+        'data-sum': `: ${modeLabel} ${summaryText}` + (leg.loading ? ', 계산 중' : '') + (warnText ? `, ${warnText}` : ''),
+      }),
+      // 접힌 상태: 이동수단 아이콘 + 시간 · 비용 (+ 경고). 누를 수 없는 요약 행
       el('div', { class: 'leg-pane leg-pane-min' }, el('div', { class: 'leg-pane-in' },
-        el('button', {
-          type: 'button',
-          class: 'leg-summary',
-          'data-leg-toggle': '',
-          'aria-expanded': 'false',
-          'aria-controls': bodyId,
-          'aria-label': `이동 구간 상세 펼치기: ${modeLabel} ${summaryText}` + (leg.loading ? ', 계산 중' : '') + (warnText ? `, ${warnText}` : ''),
-          onclick: (e) => toggleLeg(e.currentTarget.closest('.leg')),
-        }, [
-          el('span', { class: 'leg-swatch', 'aria-hidden': 'true' }),
+        el('div', { class: 'leg-summary' }, [
           UI.modeIcon(leg.mode, `leg-mode-ico m-${leg.mode}`),
           el('span', { class: 'leg-sum-text', text: summaryText }),
           leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']) : null,
           warnText ? el('span', { class: 'leg-warn', title: warnText }, icon('alert')) : null,
-          icon('chevron-down', 'leg-chev'),
         ]))),
       // 펼친 상태: 기존 상세 내용
       el('div', { class: 'leg-pane leg-pane-full', id: bodyId }, el('div', { class: 'leg-pane-in' },
@@ -468,16 +496,6 @@
               el('span', { class: 'leg-stat cost', text: legCostText(leg) }),
               ...tags,
             ]),
-            el('button', {
-              type: 'button',
-              class: 'icon-btn sm leg-collapse',
-              'data-leg-toggle': '',
-              'aria-expanded': 'true',
-              'aria-controls': bodyId,
-              title: '이동 구간 접기',
-              'aria-label': '이동 구간 상세 접기',
-              onclick: (e) => toggleLeg(e.currentTarget.closest('.leg')),
-            }, icon('chevron-down', 'leg-chev')),
           ]),
           leg.transitReal ? buildTransitRoute(leg.transitReal, item) : null,
           details.length ? el('div', { class: 'leg-detail', text: details.join(' · ') }) : null,
