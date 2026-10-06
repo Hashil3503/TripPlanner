@@ -1,0 +1,24 @@
+# systemd 서비스: 서버가 재부팅돼도 여행 플래너가 자동으로 켜진다.
+# 설치: sudo cp deploy/tripplanner.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now tripplanner
+# 키·주소는 /etc/tripplanner.env 에 넣는다 (deploy/tripplanner.env.example 참고, 저장소에 올리지 말 것)
+[Unit]
+Description=TripPlanner (여행 플래너)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tripplanner
+WorkingDirectory=/opt/tripplanner
+EnvironmentFile=/etc/tripplanner.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+# 서버 파일은 읽기만, data/ 폴더(DB)만 쓰기 허용
+ProtectSystem=strict
+ReadWritePaths=/opt/tripplanner/data
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

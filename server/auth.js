@@ -57,9 +57,10 @@ function parseCookies(header) {
   return out;
 }
 
-const sessionCookie = (token) =>
-  `${COOKIE_NAME}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 24 * 60 * 60}`;
-const clearCookie = () => `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+// secure: https로 서비스할 때 Secure를 붙여 쿠키가 암호화된 연결로만 오가게 한다
+const sessionCookie = (token, secure) =>
+  `${COOKIE_NAME}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 24 * 60 * 60}${secure ? '; Secure' : ''}`;
+const clearCookie = (secure) => `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure ? '; Secure' : ''}`;
 
 // ---- 시도 제한 (메모리) ----
 function createLimiter(max, windowMs) {
