@@ -555,6 +555,13 @@ button.node[aria-expanded="true"] .node-chev { transform: rotate(180deg); }
 .item-memo { font-size: 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .item-costs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .cost-chip {
+.item-times .times-text { min-width: 0; }
+.item-times .fixed { font-weight: 700; color: var(--text); white-space: nowrap; }
+.item-times .fixed-ico { width: 11px; height: 11px; margin-right: 2px; vertical-align: -1px; color: var(--accent, currentColor); }
+.item-gap { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+.item-gap .icon { width: 13px; height: 13px; flex: none; }
+.item-gap.wait { color: var(--ok); }
+.item-gap.late { color: var(--warn); font-weight: 600; }
   display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px;
   background: var(--surface-2); color: var(--text-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
 }

@@ -42,6 +42,7 @@
       <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
       <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
       <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
       <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
       <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="1"/><path d="M7 21l3-4"/><path d="m16 21-2-4-3-3 1-6"/><path d="m6 12 2-3 4-1 3 3 3 1"/></symbol>
       <symbol id="i-bike" viewBox="0 0 24 24"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></symbol>
@@ -203,7 +204,6 @@
           </div>
         </div>
         <div class="toolbar-row">
-          <label class="inline">시작 <input type="time" id="startTime" value="09:00"></label>
           <label class="inline">인원 <input type="number" id="peopleInput" min="1" max="99" step="1" value="1"><span>명</span></label>
         </div>
         <div class="toolbar-row view-row">
@@ -305,6 +305,12 @@
           <label>카테고리<select id="itemCat"></select></label>
           <label>체류 시간 (분)<input id="itemStay" type="number" min="0" max="1440" step="5"></label>
         </div>
+        <div class="grid2">
+          <label>시작 시각 (선택)<input id="itemFixedStart" type="time"></label>
+          <label>종료 시각 (선택)<input id="itemFixedEnd" type="time"></label>
+        </div>
+        <p class="hint" id="itemTimeHint">시작·종료·체류 중 두 개를 정하면 나머지는 자동으로 계산해요.</p>
+        <p class="form-error" id="itemError" role="alert" hidden></p>
         <div class="grid2">
           <label>입장료/기타 (1인, 원)<input id="itemCost" type="number" min="0" step="100"></label>
           <label>주차비 (총액, 원)<input id="itemParking" type="number" min="0" step="100"></label>

@@ -50,6 +50,9 @@
     const lon = Number(raw.lon);
     if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
     const modes = TP.fare.MODES.map((m) => m.id);
+    const fixedStart = validTime(raw.fixedStart) || null;
+    let fixedEnd = validTime(raw.fixedEnd) || null;
+    if (fixedStart && fixedEnd && fixedEnd <= fixedStart) fixedEnd = null; // 자정을 넘기는 종료 시각은 지원하지 않는다
     return {
       id: uid(),
       name: str(raw.name, '이름 없는 장소', 100),
@@ -57,6 +60,8 @@
       lon,
       category: CATEGORIES.some((c) => c.id === raw.category) ? raw.category : 'etc',
       stay: Math.round(num(raw.stay, 60, 0, 1440)),
+      fixedStart, // 고정 시작 시각 'HH:MM' (null = 자동 연쇄)
+      fixedEnd, // 고정 종료 시각 'HH:MM' (null = 체류 시간으로 계산)
       memo: typeof raw.memo === 'string' ? raw.memo.slice(0, 500) : '',
       cost: Math.round(num(raw.cost, 0, 0, 1e9)), // 1인 입장료/기타 비용
       parking: Math.round(num(raw.parking, 0, 0, 1e9)), // 자가용 도착 시 주차비(총액)
@@ -220,7 +225,7 @@
 
   /** 게스트 데이터에서 아직 손대지 않은 샘플 여행인지 (이름 제외 내용 비교, 날짜/ID 무시) */
   function tripSig(t) {
-    return JSON.stringify([t.name, t.days.map((d) => [d.startTime, d.items.map((i) => [i.name, i.lat, i.lon, i.category, i.stay, i.memo, i.cost, i.parking, i.modeIn])])]);
+    return JSON.stringify([t.name, t.days.map((d) => [d.startTime, d.items.map((i) => [i.name, i.lat, i.lon, i.category, i.stay, i.fixedStart || null, i.fixedEnd || null, i.memo, i.cost, i.parking, i.modeIn])])]);
   }
   const isSample = (t) => tripSig(t) === tripSig(TP.sample.create());
 
@@ -284,7 +289,7 @@
     return { id: uid(), name, startDate: startDate || '', days };
   }
   const newItem = (p) => Object.assign(
-    { id: uid(), name: '새 장소', lat: 0, lon: 0, category: 'sight', stay: 60, memo: '', cost: 0, parking: 0, modeIn: null, transitIdx: null, legMin: null, legCost: null },
+    { id: uid(), name: '새 장소', lat: 0, lon: 0, category: 'sight', stay: 60, fixedStart: null, fixedEnd: null, memo: '', cost: 0, parking: 0, modeIn: null, transitIdx: null, legMin: null, legCost: null },
     p
   );
 
