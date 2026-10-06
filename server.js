@@ -10,6 +10,7 @@ const { open } = require('./server/db');
 const auth = require('./server/auth');
 const { serveStatic } = require('./server/static');
 const { createTransit } = require('./server/transit');
+const { parsePublicUrls, clientIpFrom } = require('./server/deploy');
 
 const PORT = Number(process.env.TP_PORT) || 8000; // 카카오 키에 등록한 주소가 http://localhost:8000 이므로 기본값을 유지한다
 const HOST = '127.0.0.1';
@@ -21,8 +22,12 @@ const SETTINGS_LIMIT = 20 * 1024;
 const MAX_TRIPS_PER_USER = 200;
 const TRIP_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
-const ALLOWED_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+// 외부 배포: TP_PUBLIC_URL(서비스 주소)을 허용 목록에 더하고, 리버스 프록시 뒤라면 TP_TRUST_PROXY=1 (server/deploy.js)
+const PUBLIC_URLS = parsePublicUrls(process.env.TP_PUBLIC_URL);
+const TRUST_PROXY = process.env.TP_TRUST_PROXY === '1';
+const SECURE_COOKIE = PUBLIC_URLS.some((u) => u.https); // https로 서비스하면 쿠키를 https에서만 보낸다
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, ...PUBLIC_URLS.map((u) => u.host)]);
+const ALLOWED_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`, ...PUBLIC_URLS.map((u) => u.origin)]);
 
 const GENERIC_LOGIN_ERROR = '아이디 또는 비밀번호가 올바르지 않습니다';
 
@@ -152,10 +157,10 @@ function parseSettings(json) {
 function startSession(userId) {
   const token = auth.newToken();
   db.createSession(auth.sha256(token), userId, auth.sessionExpiry());
-  return { 'Set-Cookie': auth.sessionCookie(token) };
+  return { 'Set-Cookie': auth.sessionCookie(token, SECURE_COOKIE) };
 }
 
-const clientIp = (req) => req.socket.remoteAddress || 'unknown';
+const clientIp = (req) => clientIpFrom(req, TRUST_PROXY);
 
 function checkCredentialsFormat(username, password) {
   if (typeof username !== 'string' || !auth.USERNAME_RE.test(username)) return '아이디는 3~20자의 영문, 숫자, 밑줄(_)만 사용할 수 있어요';
@@ -202,7 +207,7 @@ async function handleLogin(req, res) {
 function handleLogout(req, res) {
   const token = auth.parseCookies(req.headers.cookie)[auth.COOKIE_NAME];
   if (token && token.length <= 128) db.deleteSession(auth.sha256(token));
-  sendJson(res, 200, { ok: true }, { 'Set-Cookie': auth.clearCookie() });
+  sendJson(res, 200, { ok: true }, { 'Set-Cookie': auth.clearCookie(SECURE_COOKIE) });
 }
 
 async function handlePassword(req, res) {
@@ -379,6 +384,7 @@ server.on('error', (e) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`여행 플래너 서버가 실행 중이에요: http://localhost:${PORT}`);
+  if (PUBLIC_URLS.length) console.log(`서비스 주소(TP_PUBLIC_URL): ${PUBLIC_URLS.map((u) => u.origin).join(', ')}${TRUST_PROXY ? ' · 프록시 IP 신뢰' : ''}`);
   // 키 값은 출력하지 않고 설정 여부만 알린다
   console.log(`카카오 JavaScript 키(TP_KAKAO_JS_KEY): ${KAKAO_JS_KEY ? '설정됨' : '없음 - 지도를 표시할 수 없어요'}`);
   console.log(`카카오 REST API 키(TP_KAKAO_REST_KEY): ${transit.hasKey() ? '설정됨' : '없음 - 대중교통은 추정치로 계산돼요'}`);

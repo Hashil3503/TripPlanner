@@ -1,0 +1,6 @@
+# /etc/caddy/Caddyfile 에 넣는다. 첫 줄을 실제 주소로 바꾸면 Caddy가 HTTPS 인증서(Let's Encrypt)를 자동으로 받는다.
+# 도메인이 없으면 공인 IP로 만든 무료 주소를 쓸 수 있다: 예) 공인 IP가 1.2.3.4 이면 1-2-3-4.sslip.io
+trip.example.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:8000
+}

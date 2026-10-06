@@ -131,6 +131,24 @@ DB 테이블: `users`(아이디, 비밀번호 해시, 설정 JSON), `sessions`(�
 - 지도 클릭 역지오코딩: 카카오 `coord2Address`로 건물명 > 도로명주소 > 지번주소 순으로 이름을 채우고, 실패하거나 결과가 없으면 Nominatim을 사용합니다.
 - 다크 모드에서도 지도 타일은 어둡게 바꾸지 않고 그대로 표시합니다(마커/말풍선만 읽기 쉽게 유지).
 
+## 외부 서버 배포 (예: Oracle Cloud Ubuntu)
+
+기본값은 이 PC에서만 접속되는 로컬 실행(`127.0.0.1:8000`)입니다. 외부 서버에서는 같은 서버의 Caddy가 HTTPS를 맡고 요청을 `127.0.0.1:8000`으로 넘깁니다. 설정 파일은 `deploy/`에 있습니다.
+
+| 환경변수 | 뜻 |
+| --- | --- |
+| `TP_PUBLIC_URL` | 서비스 주소(쉼표로 여러 개). 이 주소로 들어온 요청만 허용하고, `https://`면 세션 쿠키에 `Secure`를 붙입니다 |
+| `TP_TRUST_PROXY=1` | 같은 서버의 프록시가 보낸 `X-Forwarded-For`로 접속자 IP를 판단(로그인 시도·대중교통 호출 제한용) |
+| `TP_KAKAO_JS_KEY` / `TP_KAKAO_REST_KEY` | 카카오 키 |
+
+1. Node.js 24 설치(`node:sqlite` 필요), 코드 받기: `/opt/tripplanner`에 `git clone`, 실행 계정 `tripplanner` 생성, `data/` 폴더 소유권 부여
+2. `deploy/tripplanner.env.example` → `/etc/tripplanner.env` (권한 600)에 주소·키 입력
+3. `deploy/tripplanner.service` → `/etc/systemd/system/`, `systemctl enable --now tripplanner`
+4. Caddy 설치 후 `deploy/Caddyfile.example`을 `/etc/caddy/Caddyfile`로(도메인이 없으면 `공인IP를-하이픈으로.sslip.io`)
+5. 방화벽 두 곳에서 80·443 열기: Oracle 콘솔의 Security List(또는 NSG)와 서버 안의 iptables
+6. 카카오 개발자 콘솔에 서비스 주소 등록(JavaScript SDK 도메인)
+7. 백업: `deploy/backup.sh`를 cron에 등록(`VACUUM INTO` 스냅샷, 14일 보관). 서버 밖으로도 가끔 복사해 두세요
+
 ## 대중교통 조회 (카카오 REST API)
 
 실제 대중교통 경로·시간·요금은 카카오맵 대중교통 길찾기 REST API로 조회합니다. 키(`TP_KAKAO_REST_KEY`)는 서버만 읽고 브라우저로 보내지 않습니다.
