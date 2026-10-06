@@ -32,6 +32,8 @@
   // ---- 앱 상태(저장 안 함) ----
   let model = null; // 마지막 계산 결과
   let selectedId = null;
+  let focusedLeg = null; // 지도에서 누른 경로 구간 키 (사이드바에서 강조)
+  let focusedLegDay = -1; // 강조한 구간의 일차: 다른 일차로 바뀌면 강조를 푼다
   let dragging = false;
   let pendingRender = false;
   const inflight = new Set(); // 경로 조회 중인 구간 key
@@ -72,6 +74,7 @@
   function renderAll(opts) {
     opts = opts || {};
     S.clampDay();
+    if (focusedLeg && focusedLegDay !== S.state.dayIndex) focusedLeg = null;
     const empty = !trip();
     $('#panel').classList.toggle('is-home', empty);
     $('.layout').classList.toggle('is-home', empty);
@@ -358,6 +361,7 @@
     const collapsed = legEl.dataset.collapsed !== 'true';
     legOverride.set(legEl.dataset.key, collapsed);
     applyLegDom(legEl, collapsed);
+    if (collapsed && legEl.dataset.key === focusedLeg) setFocusedLeg(null);
     renderLegsToggle();
   }
 
@@ -383,6 +387,7 @@
       /* 이번 방문에만 적용 */
     }
     for (const legEl of document.querySelectorAll('#itemList .leg')) applyLegDom(legEl, collapsed);
+    if (collapsed) setFocusedLeg(null);
     renderLegsToggle();
   }
 
@@ -456,7 +461,7 @@
 
     // 구간 영역 전체가 토글: 선 버튼(키보드 포함)이나 빈 곳을 누르면 접고 편다. 안쪽의 다른 컨트롤과 텍스트 선택은 제외
     const legEl = el('div', {
-      class: 'leg' + (leg.loading ? ' is-loading' : ''),
+      class: 'leg' + (leg.loading ? ' is-loading' : '') + (legKey(item.id) === focusedLeg ? ' focused' : ''),
       style: `--leg:${color}`,
       dataset: { key: legKey(item.id), lineFor: legKey(item.id) },
       onclick: (e) => {
@@ -651,7 +656,7 @@
         legs: dm.rows.filter((r) => r.leg).map((r, n) => ({ leg: r.leg, color: legColorOf(i, n) })),
       });
     });
-    TP.map.render({ groups, selectedId });
+    TP.map.render({ groups, selectedId, focusedLegId: focusedLeg ? focusedLeg.slice(focusedLeg.indexOf(':') + 1) : null });
     if (fit) TP.map.fit();
   }
 
@@ -679,6 +684,7 @@
   function selectItem(id, o) {
     o = o || {};
     selectedId = id;
+    setFocusedLeg(null, -1, false); // 아래에서 지도를 다시 그린다
     for (const n of document.querySelectorAll('#itemList .item.selected')) n.classList.remove('selected');
     const li = $(`#itemList [data-id="${CSS.escape(id)}"]`);
     if (li) {
@@ -687,6 +693,31 @@
     }
     renderMap(false);
     if (o.pan) TP.map.panToItem(id, !!o.popup);
+  }
+
+  /** 지도에서 누른 경로: 그 일차로 바꾸고 사이드바에서 구간을 펼쳐 강조한 뒤 보이게 스크롤 */
+  function focusLeg(itemId, dayIndex) {
+    if (dayIndex !== S.state.dayIndex) {
+      S.state.dayIndex = dayIndex;
+      S.save();
+      renderAll();
+    }
+    const key = legKey(itemId);
+    const legEl = document.querySelector(`#itemList .leg[data-key="${CSS.escape(key)}"]`);
+    if (!legEl) return;
+    if ($('#sideLeft').classList.contains('is-collapsed')) $('#toggleLeft').click(); // 접힌 일정 사이드바는 펼친다
+    if (legEl.dataset.collapsed === 'true') toggleLeg(legEl);
+    setFocusedLeg(key, dayIndex);
+    legEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  /** 강조는 장소 선택·지도 빈 곳 클릭·그 구간 접기·일차 전환 때 풀린다 */
+  function setFocusedLeg(key, dayIndex, redraw = true) {
+    if (key === focusedLeg) return;
+    focusedLeg = key;
+    focusedLegDay = key ? dayIndex : -1;
+    for (const n of document.querySelectorAll('#itemList .leg')) n.classList.toggle('focused', n.dataset.key === key);
+    if (redraw) renderMap(false); // 지도 경로의 네온 강조도 함께 갱신
   }
 
   function setMode(itemId, mode) {
@@ -1540,6 +1571,8 @@
         selectItem(id, { scroll: true, pan: true, popup: true });
       },
       onAddPlace: addPlace,
+      onLegSelect: focusLeg,
+      onMapBlank: () => setFocusedLeg(null),
     });
     renderAll({ fit: true });
     TP.auth.init(); // 서버 세션 확인 + 서버 데이터 불러오기 (게스트면 아무 일도 없음)

@@ -499,7 +499,8 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 .trip-btn:disabled { color: var(--muted); cursor: default; }
 .trip-btn:disabled:hover { background: var(--surface); border-color: var(--border); }
 .trip-btn:disabled .chev { display: none; }
-.item { position: relative; scroll-margin-top: 96px; }
+.item, .leg { scroll-margin-top: 96px; }
+.item { position: relative; }
 .stop { position: relative; padding-left: 40px; }
 .node {
   position: absolute; left: 0; top: calc(50% - 14px); z-index: 1; /* 카드 세로 중앙 (transform은 :active 축소에 쓰므로 top으로 맞춘다) */
@@ -583,6 +584,7 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 .leg { --leg-dur: 0.22s; position: relative; padding-left: 40px; }
 .leg.is-loading { opacity: 0.85; }
 .leg { cursor: pointer; border-radius: var(--radius-sm); transition: background-color 0.15s; }
+.leg.focused { background: color-mix(in srgb, var(--leg, var(--day)) 12%, transparent); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--leg, var(--day)) 55%, transparent); } /* 지도에서 누른 구간 */
 .leg.hot { background: color-mix(in srgb, var(--leg, var(--day)) 7%, transparent); } /* 누를 수 있는 구간 영역임을 살짝 표시 */
 /* 접힘/펼침: 두 패널의 높이(0fr↔1fr)와 투명도를 짧게 교차시킨다. 숨은 쪽은 visibility+inert로 포커스에서 빠진다. */
 .leg-pane {
@@ -736,6 +738,7 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 .popup-sub .cat-ico .icon { width: 11px; height: 11px; }
 .popup-dot { margin: 0 2px; }
 .popup .btn { margin-top: 2px; }
+.leg-tip-route { color: var(--text-2); }
 .leg-tip {
   pointer-events: none; padding: 10px 12px; border-radius: var(--radius-sm);
   background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow-md);
@@ -814,7 +817,7 @@ fieldset .hint { margin: 0; }
   .summary-panel, .side.is-collapsed .summary-panel { padding: 0 12px 24px; border-top: 0; }
   .side-toggle { display: none; }
   .search { top: 42vh; } /* 고정된 지도 바로 아래에 붙는다 (지도를 가리지 않게) */
-  .items > li { scroll-margin-top: calc(42vh + 64px); } /* scrollIntoView가 지도·검색 바 뒤로 숨기지 않게 */
+  .items > li, .items .leg { scroll-margin-top: calc(42vh + 64px); } /* scrollIntoView가 지도·검색 바 뒤로 숨기지 않게 */
 
   .topbar { gap: 4px; padding: 0 10px; }
   .brand { margin-right: 4px; }
