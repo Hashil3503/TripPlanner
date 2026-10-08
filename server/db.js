@@ -45,6 +45,11 @@ function open(dbPath) {
     );
   `);
 
+  // 마이그레이션: 낙관적 잠금용 여행별 리비전(rev). 이미 배포된 DB에는 컬럼이 없으므로 추가한다.
+  if (!db.prepare('PRAGMA table_info(trips)').all().some((c) => c.name === 'rev')) {
+    db.exec('ALTER TABLE trips ADD COLUMN rev INTEGER NOT NULL DEFAULT 1');
+  }
+
   const q = {
     userByName: db.prepare('SELECT id, username, password_hash, settings_json FROM users WHERE username = ?'),
     insertUser: db.prepare('INSERT INTO users (username, password_hash, settings_json, created_at) VALUES (?, ?, NULL, ?)'),
@@ -56,13 +61,13 @@ function open(dbPath) {
     setPassword: db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
     deleteOtherSessions: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?'),
     deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
+    deleteUser: db.prepare('DELETE FROM users WHERE id = ?'), // 세션/여행은 ON DELETE CASCADE로 함께 지워진다
     deleteExpired: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
-    listTrips: db.prepare('SELECT id, data_json FROM trips WHERE user_id = ? ORDER BY rowid'),
+    listTrips: db.prepare('SELECT id, data_json, rev FROM trips WHERE user_id = ? ORDER BY rowid'),
+    getTrip: db.prepare('SELECT id, data_json, rev FROM trips WHERE user_id = ? AND id = ?'),
+    insertTrip: db.prepare('INSERT INTO trips (id, user_id, data_json, updated_at, rev) VALUES (?, ?, ?, ?, 1)'),
+    updateTrip: db.prepare('UPDATE trips SET data_json = ?, updated_at = ?, rev = rev + 1 WHERE user_id = ? AND id = ?'),
     countTrips: db.prepare('SELECT COUNT(*) AS n FROM trips WHERE user_id = ?'),
-    hasTrip: db.prepare('SELECT 1 AS x FROM trips WHERE user_id = ? AND id = ?'),
-    upsertTrip: db.prepare(
-      'INSERT INTO trips (id, user_id, data_json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, id) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at'
-    ),
     deleteTrip: db.prepare('DELETE FROM trips WHERE user_id = ? AND id = ?'),
     setSettings: db.prepare('UPDATE users SET settings_json = ? WHERE id = ?'),
     getTransit: db.prepare('SELECT json, created_at FROM transit_cache WHERE key = ?'),
@@ -81,11 +86,13 @@ function open(dbPath) {
     setPassword: (userId, hash) => q.setPassword.run(hash, userId),
     deleteOtherSessions: (userId, keepTokenHash) => q.deleteOtherSessions.run(userId, keepTokenHash),
     deleteUserSessions: (userId) => q.deleteUserSessions.run(userId),
+    deleteUser: (userId) => q.deleteUser.run(userId),
     purgeSessions: () => q.deleteExpired.run(Date.now()),
     listTrips: (userId) => q.listTrips.all(userId),
     countTrips: (userId) => q.countTrips.get(userId).n,
-    hasTrip: (userId, id) => !!q.hasTrip.get(userId, id),
-    upsertTrip: (userId, id, json) => q.upsertTrip.run(id, userId, json, Date.now()),
+    getTrip: (userId, id) => q.getTrip.get(userId, id),
+    insertTrip: (userId, id, json) => q.insertTrip.run(id, userId, json, Date.now()),
+    updateTrip: (userId, id, json) => q.updateTrip.run(json, Date.now(), userId, id),
     deleteTrip: (userId, id) => q.deleteTrip.run(userId, id).changes,
     setSettings: (userId, json) => q.setSettings.run(json, userId),
     getTransit: (key) => q.getTransit.get(key),
