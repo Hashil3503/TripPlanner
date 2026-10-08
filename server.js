@@ -230,6 +230,24 @@ async function handlePassword(req, res) {
   sendJson(res, 200, { ok: true });
 }
 
+/** 회원 탈퇴: 비밀번호를 다시 확인한 뒤 계정과 모든 여행/세션을 지운다 */
+async function handleDeleteAccount(req, res) {
+  const u = requireUser(req);
+  const body = await readJson(req);
+  const pw = typeof body.password === 'string' ? body.password : '';
+  const key = `${clientIp(req)}|${u.username.toLowerCase()}`; // 로그인과 같은 제한기·키를 쓴다
+  if (loginLimiter.blocked(key)) throw new HttpError(429, '시도가 너무 많아요. 15분 뒤에 다시 시도해 주세요');
+  const row = db.findUser(u.username);
+  const ok = row && pw.length <= auth.PASSWORD_MAX * 2 && (await auth.verifyPassword(pw, row.password_hash));
+  if (!ok) {
+    loginLimiter.fail(key);
+    throw new HttpError(401, '비밀번호가 올바르지 않습니다');
+  }
+  loginLimiter.reset(key);
+  db.deleteUser(u.id);
+  sendJson(res, 200, { ok: true }, { 'Set-Cookie': auth.clearCookie(SECURE_COOKIE) });
+}
+
 function handleMe(req, res) {
   const u = requireUser(req);
   sendJson(res, 200, { username: u.username, settings: parseSettings(u.settings_json) });
@@ -261,15 +279,39 @@ function tripIdFrom(seg) {
 function handleListTrips(req, res) {
   const u = requireUser(req);
   const trips = [];
+  const revs = {}; // 리비전은 여행 객체 밖에 둔다 (클라이언트의 스냅샷 JSON에 섞이지 않게)
   for (const row of db.listTrips(u.id)) {
     try {
       const t = JSON.parse(row.data_json);
-      if (isObj(t)) trips.push(Object.assign(t, { id: row.id }));
+      if (isObj(t)) {
+        trips.push(Object.assign(t, { id: row.id }));
+        revs[row.id] = row.rev;
+      }
     } catch (e) {
       /* 손상된 행은 건너뜀 */
     }
   }
-  sendJson(res, 200, { trips });
+  sendJson(res, 200, { trips, revs });
+}
+
+/** baseRev 검증: undefined(생략) | null | 양의 정수만 허용 */
+function checkBaseRev(v) {
+  if (v === undefined || v === null) return;
+  if (!Number.isInteger(v) || v < 1) throw new HttpError(400, 'baseRev가 올바르지 않아요');
+}
+
+/** 다른 곳에서 먼저 수정(또는 삭제)된 여행: 서버의 현재 버전을 함께 보내 클라이언트가 고르게 한다 */
+function sendTripConflict(res, row) {
+  let trip = null;
+  if (row) {
+    try {
+      const t = JSON.parse(row.data_json);
+      if (isObj(t)) trip = Object.assign(t, { id: row.id });
+    } catch (e) {
+      /* 손상된 행: 서버 버전 없이 알린다 */
+    }
+  }
+  sendJson(res, 409, { error: '다른 곳에서 이 여행이 먼저 수정됐어요', conflict: true, rev: row ? row.rev : null, trip });
 }
 
 async function handlePutTrip(req, res, idSeg) {
@@ -278,17 +320,28 @@ async function handlePutTrip(req, res, idSeg) {
   const body = await readJson(req);
   const err = validateTrip(body.trip);
   if (err) throw new HttpError(400, err);
-  if (!db.hasTrip(u.id, id) && db.countTrips(u.id) >= MAX_TRIPS_PER_USER) throw new HttpError(400, `여행은 최대 ${MAX_TRIPS_PER_USER}개까지 저장할 수 있어요`);
+  checkBaseRev(body.baseRev);
   const json = JSON.stringify(Object.assign({}, body.trip, { id }));
   if (json.length > BODY_LIMIT) throw new HttpError(413, '여행 데이터가 너무 커요');
-  db.upsertTrip(u.id, id, json);
-  sendJson(res, 200, { ok: true, id });
+  // node:sqlite는 동기식이고 아래에 await가 없어서, 읽기-비교-쓰기 사이에 다른 요청이 끼어들 수 없다 (별도 트랜잭션 불필요)
+  const row = db.getTrip(u.id, id);
+  // baseRev 생략: 옛 클라이언트(캐시된 구버전 JS)를 위한 무조건 덮어쓰기. baseRev null: 새로 만들기, 정수: 마지막으로 받은 리비전
+  if (body.baseRev === null && row) return sendTripConflict(res, row);
+  if (Number.isInteger(body.baseRev) && (!row || row.rev !== body.baseRev)) return sendTripConflict(res, row);
+  if (!row && db.countTrips(u.id) >= MAX_TRIPS_PER_USER) throw new HttpError(400, `여행은 최대 ${MAX_TRIPS_PER_USER}개까지 저장할 수 있어요`);
+  if (row) db.updateTrip(u.id, id, json);
+  else db.insertTrip(u.id, id, json);
+  sendJson(res, 200, { ok: true, id, rev: row ? row.rev + 1 : 1 });
 }
 
-function handleDeleteTrip(req, res, idSeg) {
+async function handleDeleteTrip(req, res, idSeg) {
   const u = requireUser(req);
   const id = tripIdFrom(idSeg);
-  db.deleteTrip(u.id, id);
+  const body = await readJson(req); // 본문이 없어도 {}
+  checkBaseRev(body.baseRev);
+  const row = db.getTrip(u.id, id); // 아래에 await가 없으므로 읽기-비교-삭제는 한 덩어리로 실행된다
+  if (row && Number.isInteger(body.baseRev) && row.rev !== body.baseRev) return sendTripConflict(res, row);
+  if (row) db.deleteTrip(u.id, id); // 이미 없으면 그대로 성공 처리
   sendJson(res, 200, { ok: true });
 }
 
@@ -336,7 +389,7 @@ async function handleApi(req, res, pathname) {
       case 'login': allow('POST'); return handleLogin(req, res);
       case 'logout': allow('POST'); return handleLogout(req, res);
       case 'password': allow('PUT'); return handlePassword(req, res);
-      case 'me': allow('GET'); return handleMe(req, res);
+      case 'me': allow('GET', 'DELETE'); return method === 'GET' ? handleMe(req, res) : handleDeleteAccount(req, res);
       case 'trips': allow('GET'); return handleListTrips(req, res);
       case 'settings': allow('PUT'); return handlePutSettings(req, res);
       case 'transit': allow('GET'); return handleTransit(req, res);

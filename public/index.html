@@ -151,6 +151,7 @@
             <div class="menu-head"><span class="muted">로그인한 계정</span><strong id="userNameMenu"></strong></div>
             <div class="menu-sep" role="separator"></div>
             <button class="menu-item" id="btnPassword" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>비밀번호 변경</button>
+            <button class="menu-item danger" id="btnDeleteAccount" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>회원 탈퇴</button>
             <button class="menu-item" id="btnLogout" type="button" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg>로그아웃</button>
           </div>
         </div>
@@ -432,6 +433,44 @@
         <button class="btn primary" type="submit" id="pwSubmit">변경하기</button>
       </footer>
     </form>
+  </dialog>
+
+  <!-- 회원 탈퇴 -->
+  <dialog id="delDialog" aria-labelledby="delTitle">
+    <form id="delForm" method="dialog" class="dialog-form" novalidate>
+      <header class="dlg-head">
+        <h2 id="delTitle">회원 탈퇴</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <p>탈퇴하면 계정과 서버에 저장된 모든 여행이 영구적으로 삭제되고, 복구할 수 없어요.</p>
+        <p class="hint">필요한 여행은 먼저 여행 목록에서 JSON 내보내기로 저장해 두세요.</p>
+        <label>비밀번호 확인<input id="delPass" type="password" name="password" maxlength="72" autocomplete="current-password"></label>
+        <p class="form-error" id="delError" role="alert" hidden></p>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn danger" type="submit" id="delSubmit">탈퇴하기</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 여행 저장 충돌 (다른 기기/탭에서 먼저 수정됨) -->
+  <dialog id="conflictDialog" aria-labelledby="conflictTitle">
+    <div class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="conflictTitle">여행이 먼저 수정됐어요</h2>
+      </header>
+      <div class="dlg-body">
+        <p id="conflictMsg"></p>
+        <p class="hint">다른 곳의 버전을 불러오면 이 기기의 변경은 사라지고, 덮어쓰면 다른 곳의 변경이 사라져요.</p>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" data-close>나중에</button>
+        <button class="btn" type="button" id="conflictServer">다른 곳의 버전 불러오기</button>
+        <button class="btn primary" type="button" id="conflictMine">내 변경으로 덮어쓰기</button>
+      </footer>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

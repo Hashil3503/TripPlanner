@@ -1568,6 +1568,92 @@
     }
   }
 
+  function showDelError(msg) {
+    const p = $('#delError');
+    p.textContent = msg;
+    p.hidden = !msg;
+  }
+
+  function openDeleteAccount() {
+    $('#delForm').reset();
+    showDelError('');
+    $('#delDialog').showModal();
+    $('#delPass').focus();
+  }
+
+  async function submitDeleteAccount() {
+    const pass = $('#delPass').value;
+    if (!pass) return showDelError('비밀번호를 입력해 주세요.');
+    showDelError('');
+    const btn = $('#delSubmit');
+    btn.disabled = true;
+    try {
+      await TP.auth.deleteAccount(pass);
+      $('#delDialog').close();
+      $('#delForm').reset();
+      toast('계정을 삭제했어요');
+    } catch (e) {
+      showDelError(e.message || '요청에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ---- 저장 충돌: 여러 건이면 줄을 세워 하나씩 묻는다. Esc/나중에로 닫으면 해결하지 않고 보류를 유지한다 (저장 상태를 눌러 다시 열 수 있다) ----
+  const conflictQueue = [];
+  let conflictCurrent = null;
+
+  function showNextConflict() {
+    const dlg = $('#conflictDialog');
+    if (dlg.open || !conflictQueue.length || !TP.auth.current()) return;
+    conflictCurrent = conflictQueue.shift();
+    const c = conflictCurrent;
+    const name = c.name || '이름 없는 여행';
+    $('#conflictMsg').textContent = c.serverTrip ? `'${name}' 여행이 다른 기기나 탭에서 먼저 수정됐어요.` : `'${name}' 여행이 다른 기기나 탭에서 삭제됐어요.`;
+    $('#conflictServer').textContent = c.serverTrip ? '다른 곳의 버전 불러오기' : '삭제 반영하기';
+    $('#conflictMine').textContent = c.serverTrip ? '내 변경으로 덮어쓰기' : '내 여행 다시 저장하기';
+    dlg.showModal();
+  }
+
+  function queueConflict(c) {
+    if (conflictCurrent && conflictCurrent.id === c.id) return;
+    const i = conflictQueue.findIndex((x) => x.id === c.id);
+    if (i >= 0) conflictQueue[i] = c;
+    else conflictQueue.push(c);
+    showNextConflict();
+  }
+
+  function resolveCurrentConflict(choice) {
+    const c = conflictCurrent;
+    conflictCurrent = null; // close 이벤트에서 '해결 없이 닫힘'과 구분한다
+    $('#conflictDialog').close();
+    if (c) TP.auth.resolveConflict(c.id, choice);
+    showNextConflict();
+  }
+
+  function bindConflict() {
+    $('#conflictServer').addEventListener('click', () => resolveCurrentConflict('server'));
+    $('#conflictMine').addEventListener('click', () => resolveCurrentConflict('mine'));
+    $('#conflictDialog').addEventListener('close', () => {
+      if (!conflictCurrent) return; // 버튼으로 해결해서 닫힘
+      conflictCurrent = null; // Esc/나중에: 해결하지 않는다. 남은 건도 비우고, 다시 열기는 retry()가 맡는다
+      conflictQueue.length = 0;
+    });
+    TP.auth.on('conflict', queueConflict);
+    TP.auth.on('change', () => {
+      // 로그아웃/세션 만료/탈퇴: 보류된 충돌은 사라졌으므로 열린 창도 닫는다
+      conflictQueue.length = 0;
+      conflictCurrent = null;
+      if ($('#conflictDialog').open) $('#conflictDialog').close();
+    });
+    TP.auth.on('tripsReplaced', () => {
+      // 다른 곳의 버전으로 여행이 바뀜: 현재 화면을 새 데이터로 다시 그린다
+      selectedId = null;
+      TP.map.clearExtra();
+      applyRoute({ force: true });
+    });
+  }
+
   function bindAuth() {
     $('#btnLogin').addEventListener('click', () => openAuth('login'));
     $('#btnSignup').addEventListener('click', () => openAuth('signup'));
@@ -1585,6 +1671,8 @@
     });
     $('#btnHomeLogin').addEventListener('click', () => openAuth('login'));
     $('#btnPassword').addEventListener('click', openPassword);
+    $('#btnDeleteAccount').addEventListener('click', openDeleteAccount);
+    $('#delForm').addEventListener('submit', (e) => { e.preventDefault(); submitDeleteAccount(); });
     $('#pwForm').addEventListener('submit', (e) => { e.preventDefault(); submitPassword(); });
     $('#btnLogout').addEventListener('click', async () => {
       if (await TP.auth.logout()) toast('로그아웃했어요');
@@ -1593,6 +1681,7 @@
     $('#authForm').addEventListener('submit', (e) => { e.preventDefault(); submitAuth(); });
     $('#saveStatus').addEventListener('click', () => TP.auth.retry());
 
+    bindConflict();
     TP.auth.on('status', renderSaveStatus);
     TP.auth.on('notice', toast);
     TP.auth.on('change', () => {
