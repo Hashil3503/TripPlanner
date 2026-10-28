@@ -140,6 +140,12 @@ test('legCost: override는 unknown보다 우선', () => {
   assert.equal(c.total, 2000);
 });
 
+test('자가용: 경로의 고속도로 거리로 통행료 추정 (TP-004)', () => {
+  route = { distance: 10000, duration: 1200, geometry: [], estimated: false, tollKm: 100 };
+  const leg = P.computeLeg(A, item({ modeIn: 'car' }), cfg(), 540);
+  assert.equal(leg.cost.toll, 5300);
+});
+
 // ---- 고정 시작/종료 시각 (TP-009) ----
 // 이동 시간을 20분으로 고정해 도착 예정을 계산하기 쉽게 한다 (직접 입력 legMin)
 const fixedDay = (items, startTime = '09:00') => ({ startTime, items });
