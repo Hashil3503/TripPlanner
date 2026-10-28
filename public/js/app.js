@@ -589,7 +589,7 @@
     if (leg.override.cost) {
       details.push(leg.mode === 'taxi' || leg.mode === 'car' ? '직접 입력한 요금은 차량 1대 총액으로 봐요' : '직접 입력한 요금은 1인 기준이에요');
     } else if (leg.mode === 'car') {
-      details.push(`연료비 ${won(leg.cost.fuel)}` + (leg.cost.parking ? ` + 주차 ${won(leg.cost.parking)}` : '') + ' · 통행료 미포함');
+      details.push(`연료비 ${won(leg.cost.fuel)}` + (leg.cost.toll ? ` + 통행료 약 ${won(leg.cost.toll)}` : '') + (leg.cost.parking ? ` + 주차 ${won(leg.cost.parking)}` : '') + (leg.estimated && !leg.loading ? ' · 통행료 미포함(경로 조회 실패)' : ''));
     } else if (leg.mode === 'taxi' && settings().people > 1) {
       details.push('택시 요금은 인원이 나눠 낸다고 가정');
     } else if (leg.transit && leg.fallbackReason) {
@@ -763,7 +763,7 @@
       el('h4', { text: '일차별 합계' }),
       el('div', { class: 'day-rows' }, dayRows),
       ...(t.unknownCostLegs ? [el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(t.unknownCostLegs)} (도시 간 이동은 요금을 직접 입력해 주세요)`])] : []),
-      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)이며, 조회가 안 되면 추정값입니다(도시 간 이동은 요금 미정으로 두고 합계에서 제외해요). 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 추정치이고 통행료(고속도로)는 포함되지 않습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
+      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)이며, 조회가 안 되면 추정값입니다(도시 간 이동은 요금 미정으로 두고 합계에서 제외해요). 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 추정치이고 통행료(고속도로)는 포함되지 않습니다. 자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
     );
   }
 
@@ -1220,7 +1220,7 @@
     walk: ['요금 (1인, 원)', '인원 수만큼 곱해서 합계에 반영해요.'],
     bike: ['요금 (1인, 원)', '인원 수만큼 곱해서 합계에 반영해요.'],
     taxi: ['택시 요금 (차량 1대 총액, 원)', '인원이 나눠 낸다고 보고 총액 그대로 합계에 반영해요.'],
-    car: ['자가용 비용 (차량 1대 총액, 원)', '연료비·주차비를 대신하는 총액이에요. 통행료가 있다면 함께 넣어 주세요.'],
+    car: ['자가용 비용 (차량 1대 총액, 원)', '연료비·통행료·주차비를 대신하는 총액이에요.'],
   };
 
   function openLegDialog(itemId) {
@@ -1288,10 +1288,12 @@
       ],
     },
     {
-      group: '자가용 (통행료 미포함)',
+      group: '자가용',
       fields: [
         { path: 'car.efficiency', label: '연비', unit: 'km/L', min: 0.5, step: 0.5 },
         { path: 'car.fuelPrice', label: '유가', unit: '원/L', min: 0, step: 10 },
+        { path: 'car.tollBase', label: '고속도로 통행료 기본요금', unit: '원', min: 0, step: 100 },
+        { path: 'car.tollPerKm', label: '고속도로 통행료 km당 요금', unit: '원/km', min: 0, step: 0.1 },
       ],
     },
     {

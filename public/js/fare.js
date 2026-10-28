@@ -30,6 +30,8 @@
     car: {
       efficiency: 12, // 연비(km/L)
       fuelPrice: 1700, // 유가(원/L)
+      tollBase: 900, // 고속도로 통행료 기본요금(원, 1종 폐쇄식)
+      tollPerKm: 44.3, // km당 주행요금(원, 1종)
     },
     est: {
       walk: 4.5, // km/h (경로 조회 실패 시 추정용)
@@ -93,11 +95,29 @@
     return roundTo(fare * (1 + rate), 100);
   }
 
-  /** 자가용 연료비(원, 10원 단위). 통행료는 계산하지 않는다. */
+  /** 자가용 연료비(원, 10원 단위). */
   function fuelCost(distKm, cfg) {
     const c = (cfg || DEFAULT_CONFIG).car;
     if (!(c.efficiency > 0)) return 0;
     return roundTo((distKm / c.efficiency) * c.fuelPrice, 10);
+  }
+
+  // shortcut: 도로 이름/번호로 고속도로를 판별해 민자고속도로·개방식 요금·무료 구간은 구분하지 못한다. 정확도가 필요하면 통행료를 주는 길찾기 API로 교체
+  function tollRoadKm(steps) {
+    if (!Array.isArray(steps)) return 0;
+    let meters = 0;
+    for (const s of steps) {
+      if (!s || typeof s !== 'object') continue;
+      if ((typeof s.name === 'string' && s.name.includes('고속도로')) || (!s.name && s.ref)) meters += Math.max(0, s.distance || 0);
+    }
+    return meters / 1000;
+  }
+
+  /** 자가용 고속도로 통행료(원, 100원 단위 추정). km: 고속도로 거리(km) */
+  function tollFare(km, cfg) {
+    if (!(km > 0)) return 0;
+    const c = (cfg || DEFAULT_CONFIG).car;
+    return roundTo(c.tollBase + km * c.tollPerKm, 100);
   }
 
   /** rangePick 값을 0 / 0.5 / 1 중 가장 가까운 값으로 (잘못된 값은 기본값 1 = 최대) */
@@ -114,18 +134,19 @@
   }
 
   /** 한 구간의 비용.
-   * opts: { mode, distanceM, depMin, parking, fare }  (fare: 대중교통 실제 1인 요금 - 있으면 거리 기반 추정 대신 사용,
+   * opts: { mode, distanceM, depMin, parking, fare, tollKm }  (fare: 대중교통 실제 1인 요금 - 있으면 거리 기반 추정 대신 사용,
    *  fareMin/fareMax: 요금이 범위로 온 경우 - fare가 없을 때 rangePick 기준으로 사용,
+   *  tollKm: 경로 중 고속도로 거리(km, 자가용 통행료 추정용),
    *  override: 사용자 직접 입력 요금(원) - 있으면 계산 대신 사용. 대중교통·도보·자전거는 1인 요금, 택시·자가용은 차량 1대 총액,
    *  unknown: true면 요금 미정(0원, 합계에서 제외))
-   * 반환: { total(전체 인원 합), perPerson, fuel, parking, surchargeRate, unknown }
+   * 반환: { total(전체 인원 합), perPerson, fuel, parking, toll, surchargeRate, unknown }
    *  - 대중교통: 요금 x 인원 / 택시·자가용: 차량 1대를 공유(총액 / 인원)
    *  - 도보·자전거: 0원 */
   function legCost(opts, cfg) {
     cfg = cfg || DEFAULT_CONFIG;
     const people = Math.max(1, Math.round(cfg.people || 1));
     const distM = Math.max(0, opts.distanceM || 0);
-    const out = { total: 0, perPerson: 0, fuel: 0, parking: 0, surchargeRate: 0, unknown: false };
+    const out = { total: 0, perPerson: 0, fuel: 0, parking: 0, toll: 0, surchargeRate: 0, unknown: false };
     const hasOverride = opts.override != null && isFinite(opts.override) && opts.override >= 0;
     if (hasOverride) {
       const v = Math.round(opts.override);
@@ -160,7 +181,8 @@
       case 'car': {
         out.fuel = fuelCost(distM / 1000, cfg);
         out.parking = Math.max(0, opts.parking || 0);
-        out.total = out.fuel + out.parking;
+        out.toll = tollFare(opts.tollKm, cfg);
+        out.total = out.fuel + out.parking + out.toll;
         out.perPerson = out.total / people;
         break;
       }
@@ -170,7 +192,7 @@
     return out;
   }
 
-  const fare = { DEFAULT_CONFIG, MODES, transitFare, taxiNightRate, taxiFare, fuelCost, snapRangePick, rangeFare, legCost };
+  const fare = { DEFAULT_CONFIG, MODES, transitFare, taxiNightRate, taxiFare, fuelCost, tollRoadKm, tollFare, snapRangePick, rangeFare, legCost };
   TP.fare = fare;
   if (typeof module !== 'undefined' && module.exports) module.exports = fare;
 })(typeof window !== 'undefined' ? window : globalThis);

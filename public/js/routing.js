@@ -110,7 +110,7 @@
   }
 
   // ---- 캐시 (메모리 + localStorage) ----
-  const memory = new Map(); // key -> { distance, duration, geometry, estimated:false, transit? }
+  const memory = new Map(); // key -> { distance, duration, geometry, estimated:false, tollKm?, transit? }
   const failed = new Map(); // key -> { t: 실패 시각, reason, permanent } (permanent: 경로 없음 - 세션 동안 재조회 안 함)
   const pending = new Map(); // key -> Promise
   let persistTimer = null;
@@ -133,7 +133,12 @@
         const e = v.x && transitEntry(v.x.u, v.x.r);
         if (e) memory.set(k, e);
       } else if (isFinite(v.d) && isFinite(v.t) && Array.isArray(v.g)) {
-        memory.set(k, { distance: v.d, duration: v.t, geometry: v.g, estimated: false });
+        if (k.startsWith('car|')) {
+          if (!isFinite(v.k)) continue; // 통행료 정보가 없는 예전 항목은 버리고 다시 조회
+          memory.set(k, { distance: v.d, duration: v.t, geometry: v.g, estimated: false, tollKm: v.k });
+        } else {
+          memory.set(k, { distance: v.d, duration: v.t, geometry: v.g, estimated: false });
+        }
       }
     }
     for (const ok of OLD_CACHE_KEYS) localStorage.removeItem(ok);
@@ -149,7 +154,7 @@
       const parts = [];
       let total = 2;
       for (const [k, v] of memory) {
-        const val = JSON.stringify(v.transit ? { x: { u: v.transit.landingURL, r: v.transit.routes } } : { d: v.distance, t: v.duration, g: v.geometry });
+        const val = JSON.stringify(v.transit ? { x: { u: v.transit.landingURL, r: v.transit.routes } } : typeof v.tollKm === 'number' && isFinite(v.tollKm) ? { d: v.distance, t: v.duration, g: v.geometry, k: v.tollKm } : { d: v.distance, t: v.duration, g: v.geometry });
         parts.push([k, val]);
         total += k.length + val.length + 4;
       }
@@ -218,7 +223,7 @@
   const enqueue = (run, priority) => new Promise((resolve, reject) => { queue.push({ run, resolve, reject, priority }); pump(); });
 
   async function fetchRoute(a, b, profile) {
-    const url = `${ENDPOINTS[profile]}${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`;
+    const url = `${ENDPOINTS[profile]}${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson` + (profile === 'car' ? '&steps=true' : '');
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
@@ -228,7 +233,9 @@
       if (j.code !== 'Ok' || !j.routes || !j.routes[0]) throw new Error(j.code || 'no route');
       const r = j.routes[0];
       const coords = ((r.geometry && r.geometry.coordinates) || []).map((c) => [c[1], c[0]]); // [lon,lat] -> [lat,lon]
-      return { distance: r.distance, duration: r.duration, geometry: decimate(coords.length ? coords : [[a.lat, a.lon], [b.lat, b.lon]]), estimated: false };
+      const out = { distance: r.distance, duration: r.duration, geometry: decimate(coords.length ? coords : [[a.lat, a.lon], [b.lat, b.lon]]), estimated: false };
+      if (profile === 'car') out.tollKm = TP.fare.tollRoadKm(r.legs && r.legs[0] && r.legs[0].steps); // 자가용 통행료 추정용 고속도로 거리
+      return out;
     } finally {
       clearTimeout(timer);
     }

@@ -88,7 +88,7 @@
     const durationMin = ovMin ? item.legMin : Math.ceil(seconds / 60 - 1e-9);
     // 실경로인데 카카오가 요금을 아예 안 준 경우(예: 심야 공항버스+지하철)도 거리 기반 시내 요금으로 추정하지 않고 미정으로 둔다
     const noFare = Boolean(real && !real.fareKnown && !real.fareRange);
-    const cost = TP.fare.legCost({ mode, distanceM: distance, depMin, parking: item.parking, fare, fareMin, fareMax, override: ovCost ? item.legCost : null, unknown: (interCity || noFare) && !ovCost }, settings);
+    const cost = TP.fare.legCost({ mode, distanceM: distance, depMin, parking: item.parking, fare, fareMin, fareMax, tollKm: route.tollKm, override: ovCost ? item.legCost : null, unknown: (interCity || noFare) && !ovCost }, settings);
     return {
       from: prev,
       to: item,
