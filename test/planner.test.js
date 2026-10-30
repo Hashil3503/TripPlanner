@@ -282,3 +282,22 @@ test('stepName: 버스는 묶인 노선 번호를 모두 보여준다', () => {
   assert.equal(P.stepName({ type: 'BUS', guidance: '', vehicles: ['6015', '6701', 'N6701(심야)'] }), '6015·6701·N6701(심야)');
   assert.equal(P.stepName({ type: 'SUBWAY', guidance: '', vehicles: ['1호선', '4호선', '공항철도'] }), '1호선·4호선');
 });
+
+test('buildTrip: 마지막 장소 체류가 자정을 넘기면 다음 날 맨 앞에 이어진 체류 행을 붙이고 그 종료 시각에 시작한다', () => {
+  route = { distance: 1000, duration: 600, geometry: [] };
+  const hotel = { id: 'h', name: '숙소', lat: 35.1, lon: 129.0, stay: 720, cost: 10000, parking: 0, category: 'stay' };
+  const cafe = { id: 'c', name: '카페', lat: 35.2, lon: 129.1, stay: 60, cost: 0, parking: 0, category: 'cafe', modeIn: 'walk' };
+  const trip = { days: [{ startTime: '21:00', items: [hotel] }, { startTime: '09:00', items: [cafe] }] };
+  const m = P.buildTrip(trip, cfg());
+  const d2 = m.days[1];
+  assert.equal(d2.rows.length, 2);
+  assert.equal(d2.rows[0].carry, true);
+  assert.equal(d2.rows[0].departure, 21 * 60 + 720 - 1440); // 09:00
+  assert.equal(d2.rows[1].leg.from, hotel);
+  assert.equal(d2.stats.extra, 0); // 숙소 비용은 전날에만
+  assert.equal(m.totals.items, 2);
+  // 다음 날 첫 장소가 이미 같은 숙소면 중복으로 붙이지 않는다
+  const t2 = { days: [{ startTime: '21:00', items: [hotel] }, { startTime: '09:00', items: [{ ...hotel, id: 'h2' }, cafe] }] };
+  assert.equal(P.buildTrip(t2, cfg()).days[1].rows[0].carry, undefined);
+  route = null;
+});
