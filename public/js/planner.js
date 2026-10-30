@@ -114,11 +114,11 @@
   // ---- 대중교통 실경로 표시용 ----
   const STEP_ICON = { SUBWAY: '🚇', BUS: '🚌', WALKING: '🚶' };
   const stepIcon = (type) => STEP_ICON[type] || '🚏';
-  /** 탑승 구간 이름: 노선 번호(여러 개면 '첫 노선 외 N대'), 없으면 안내 문구 */
+  /** 탑승 구간 이름: 버스는 묶인 노선 번호 전부(요금 범위의 원인이라 모두 보여준다), 그 외 2개까지, 없으면 안내 문구 */
   function stepName(step) {
     const v = step.vehicles || [];
     if (!v.length) return step.guidance.split(' (')[0] || '이동';
-    return v.length > 1 && step.type === 'BUS' ? `${v[0]}외 ${v.length - 1}대` : v.slice(0, 2).join('·');
+    return (step.type === 'BUS' ? v : v.slice(0, 2)).join('·');
   }
   /** '🚇 5호선 → 🚌 7212' (도보 구간은 생략, 탑승 구간이 없으면 도보) */
   function routeSummary(route) {
