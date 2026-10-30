@@ -1232,8 +1232,11 @@
     editingLegId = itemId;
     const [label, help] = LEG_COST_HELP[leg.mode] || LEG_COST_HELP.transit;
     $('#legDialogSub').textContent = `${d.items[i - 1].name} → ${it.name}`;
-    $('#legMin').value = it.legMin == null ? '' : it.legMin;
-    $('#legMin').placeholder = `자동 ${leg.durationMin}`;
+    const set = it.legMin != null;
+    $('#legHour').value = set ? Math.floor(it.legMin / 60) : '';
+    $('#legMin').value = set ? it.legMin % 60 : '';
+    $('#legHour').placeholder = `자동 ${Math.floor(leg.durationMin / 60)}`;
+    $('#legMin').placeholder = `자동 ${leg.durationMin % 60}`;
     $('#legCostLabel').textContent = label;
     $('#legCostHelp').textContent = help;
     $('#legCost').value = it.legCost == null ? '' : it.legCost;
@@ -1248,7 +1251,9 @@
       const v = Number(raw);
       return clear || raw === '' || !isFinite(v) ? null : Math.round(Math.min(max, Math.max(0, v)));
     };
-    it.legMin = opt('#legMin', 1440 * 3);
+    const h = opt('#legHour', 72);
+    const m = opt('#legMin', 59);
+    it.legMin = h == null && m == null ? null : Math.min(1440 * 3, (h || 0) * 60 + (m || 0)); // 한쪽만 비우면 0으로 본다
     it.legCost = opt('#legCost', 1e8);
     S.save();
     $('#legDialog').close();

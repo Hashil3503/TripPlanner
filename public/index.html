@@ -305,7 +305,10 @@
       </header>
       <div class="dlg-body">
         <p class="hint" id="legDialogSub"></p>
-        <label>소요 시간 (분)<input id="legMin" type="number" min="0" max="4320" step="5" inputmode="numeric"></label>
+        <div class="grid2">
+          <label>소요 시간 (시간)<input id="legHour" type="number" min="0" max="72" step="1" inputmode="numeric"></label>
+          <label>(분)<input id="legMin" type="number" min="0" max="59" step="1" inputmode="numeric"></label>
+        </div>
         <label><span id="legCostLabel">요금 (원)</span><input id="legCost" type="number" min="0" max="100000000" step="100" inputmode="numeric"></label>
         <p class="hint" id="legCostHelp"></p>
         <p class="hint">비워 두면 자동 계산값을 써요. 이동수단을 바꾸거나 순서를 바꾸면 직접 입력한 값은 지워져요.</p>
