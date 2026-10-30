@@ -577,9 +577,14 @@
     return toMin(Math.max(0, route.totalTime - ride));
   }
 
+  const MARK_CLS = { 추정: 'k-est', 직접: 'k-manual', 미정: 'k-unknown', 할증: 'k-surcharge' };
+
   function buildLeg(leg, item, color, idx) {
     const tagDefs = [];
-    const notes = []; // 접힌 행의 경고 아이콘에 담을 안내
+    const notes = []; // 구간 선의 접근성 요약에 담을 안내
+    // 접힌 행의 짧은 표시: '추정'은 실제 값을 몰라 추산한 경우만. 같은 글자는 하나로 묶고 사유는 툴팁으로
+    const marks = new Map();
+    const mark = (label, why) => marks.set(label, (marks.has(label) ? marks.get(label) + ', ' : '') + why);
     // 태그 DOM은 접힌 행과 펼친 카드 두 곳에 필요하므로 정의만 모아 두고 그릴 때마다 새로 만든다
     const tag = (cls, text, title, children) => tagDefs.push({ cls, text, title, children });
     const buildTags = () => tagDefs.map((t) => el('span', { class: 'tag' + (t.cls ? ' ' + t.cls : ''), title: t.title, text: t.text }, t.children));
@@ -587,30 +592,36 @@
     else if (leg.estimated) {
       tag('warn', '추정(직선거리 기반)');
       notes.push('추정(직선거리 기반)');
+      mark('추정', '추정(직선거리 기반)');
     }
-    if (leg.transit) {
+    // 시간·요금을 모두 직접 입력했으면 화면의 값은 추정이 아니므로 태그·표시 모두 붙이지 않는다
+    if (leg.transit && !(leg.override.min && leg.override.cost)) {
       tag('', '대중교통 추정', leg.fallbackReason || '');
-      if (!(leg.override.min && leg.override.cost)) notes.push('대중교통 추정'); // 시간·요금을 모두 직접 입력했으면 접힌 행 경고는 생략
+      notes.push('대중교통 추정');
+      mark('추정', '대중교통 추정');
     }
     if (leg.cost.unknown) {
       const t = leg.interCity ? '도시 간 · 요금 미정' : '요금 미정';
       tag('warn', t, leg.interCity ? INTERCITY_HINT : NOFARE_HINT);
       notes.push(t);
+      mark('미정', t);
     }
     if (leg.override.min || leg.override.cost) {
       const what = leg.override.min && leg.override.cost ? '시간·요금' : leg.override.min ? '시간' : '요금';
       tag('accent', '직접 입력', `${what}을 직접 입력한 값이에요`);
       notes.push(`${what} 직접 입력`);
+      mark('직접', `${what} 직접 입력`);
     }
     if (leg.transitReal && leg.transitReal.fareRange) {
       const fr = leg.transitReal.fareRange;
       tag('', '요금 범위', `카카오가 요금을 ${rangeText(fr.min, fr.max)} 범위로 알려줘 합계에는 ${rangePickLabel()}을 반영했어요`);
-      notes.push(`요금 범위(${rangePickLabel()} 반영)`);
+      // 접힌 행에는 '범위' 글자가 따로 보이므로 '추정' 사유에는 넣지 않는다
     }
     if (leg.cost.surchargeRate > 0) {
       const t = `심야할증 +${Math.round(leg.cost.surchargeRate * 100)}%`;
       tag('warn', t);
       notes.push(t);
+      mark('할증', t);
     }
 
     const details = [];
@@ -712,7 +723,7 @@
             el('strong', { class: 'leg-sum-cost', text: legCostShort(leg) }),
             fr && !leg.override.cost ? el('span', { class: 'leg-sum-range', title: '요금 범위', text: '범위' }) : null,
             leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']) : null,
-            warnText ? el('span', { class: 'leg-warn', title: warnText, text: '추정' }) : null, // 자세한 사유는 마우스를 올리면 보인다
+            ...[...marks].map(([label, why]) => el('span', { class: 'leg-warn ' + MARK_CLS[label], title: why, text: label })), // 자세한 사유는 마우스를 올리면 보인다
           ]),
           el('div', { class: 'leg-sum-sub' }, sumSub),
         ]))),

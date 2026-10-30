@@ -605,7 +605,12 @@ body[data-view='main'] .trip-only { display: none !important; }
 .leg-sum-range { font-size: 11px; color: var(--warn); }
 .leg-sum-dist { font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .leg-summary .tag.loading { padding-left: 0; }
-.leg-warn { flex: none; font-size: 11px; color: var(--muted); text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; } /* '범위'(주의 색)와 구분되는 회색, 점선은 툴팁이 있다는 표시 */
+.leg-warn { flex: none; font-size: 11px; color: var(--muted); cursor: help; } /* '범위'와 같은 모양, 사유는 툴팁 */
+/* 표시별 색: 범위(주의 색)와 겹치지 않게 추정 회색 · 직접 파랑 · 미정 빨강 · 할증 보라 */
+.leg-warn.k-est { color: var(--muted); }
+.leg-warn.k-manual { color: var(--accent-text); }
+.leg-warn.k-unknown { color: var(--danger); }
+.leg-warn.k-surcharge { color: var(--cat-sight); }
 
 /* 이동수단 선택 (접힌 행 · 펼친 카드 공용) */
 .mode-select {
