@@ -344,7 +344,9 @@
     const item = row.item;
     const stay = row.departure - row.arrival; // 종료 시각을 고정하면 체류 시간은 시각 차이로 정해진다
     const pin = (fixed) => (fixed ? [icon('lock', 'fixed-ico')] : []);
-    const timeParts = stay > 0
+    const timeParts = row.carry
+      ? [`~ ${F.fmtTime(row.departure)} · 전날부터 이어서 체류`]
+      : stay > 0
       ? [el('span', { class: item.fixedStart ? 'fixed' : '' }, [...pin(item.fixedStart), F.fmtTime(row.arrival)]), ' – ',
         el('span', { class: item.fixedEnd ? 'fixed' : '' }, [...pin(item.fixedEnd), F.fmtTime(row.departure)]), ` · ${stay}분 체류`]
       : [el('span', { class: item.fixedStart ? 'fixed' : '' }, [...pin(item.fixedStart), F.fmtTime(row.arrival)]), ' 도착 · 체류 없음'];
@@ -371,7 +373,7 @@
         }
       },
     }, [
-      el('span', { class: 'drag-handle', title: '끌어서 순서 변경', 'aria-label': '끌어서 순서 변경' }, icon('grip')),
+      row.carry ? null : el('span', { class: 'drag-handle', title: '끌어서 순서 변경', 'aria-label': '끌어서 순서 변경' }, icon('grip')),
       el('div', { class: 'item-body' }, [
         el('div', { class: 'item-title' }, [UI.catIcon(item.category), el('span', { class: 'name', text: item.name })]),
         el('div', { class: 'item-times' + (row.late ? ' late' : '') }, [
@@ -382,7 +384,7 @@
         item.memo ? el('div', { class: 'item-memo', text: item.memo }) : null,
         costChips.length ? el('div', { class: 'item-costs' }, costChips) : null,
       ]),
-      el('div', { class: 'item-actions' }, [
+      row.carry ? null : el('div', { class: 'item-actions' }, [
         el('button', { type: 'button', class: 'icon-btn sm', title: '수정', 'aria-label': `${item.name} 수정`, onclick: (e) => { e.stopPropagation(); openItemDialog(item.id); } }, icon('pencil')),
         el('button', { type: 'button', class: 'icon-btn sm danger', title: '삭제', 'aria-label': `${item.name} 삭제`, onclick: (e) => { e.stopPropagation(); deleteItem(item.id); } }, icon('trash')),
       ]),
@@ -392,7 +394,8 @@
     const next = dm.rows[idx + 1];
     const last = idx === dm.rows.length - 1;
     return el('li', {
-      class: 'item' + (item.id === selectedId ? ' selected' : '') + (row.late ? ' over-midnight' : ''),
+      class: 'item' + (row.carry ? ' carry' : '') + (item.id === selectedId ? ' selected' : '') + (row.late ? ' over-midnight' : ''),
+      title: row.carry ? '전날 마지막 장소의 체류가 자정을 넘겨 자동으로 이어 붙였어요. 수정은 전날 일정에서 해요' : null,
       // 장소 옆 타임라인 선도 들어오는/나가는 구간 색으로 이어지게
       style: (idx > 0 ? `--prev-leg:${legColorOf(dm.dayIndex, idx - 1)};` : '') + (last ? '' : `--next-leg:${legColorOf(dm.dayIndex, idx)}`),
       dataset: { id: item.id },
@@ -797,7 +800,8 @@
         dayIndex: i,
         color: colorOf(i),
         active,
-        points: dm.rows.map((r, n) => ({ item: r.item, number: n + 1, arrival: r.arrival })),
+        // 전체 일차 표시 중에는 이어진 체류 핀이 전날 핀과 겹치고 같은 id라 마커가 덮이므로 뺀다
+        points: dm.rows.map((r, n) => ({ item: r.item, number: n + 1, arrival: r.arrival, carry: r.carry })).filter((p) => !(p.carry && S.state.showAll)),
         legs: dm.rows.filter((r) => r.leg).map((r, n) => ({ leg: r.leg, color: legColorOf(i, n) })),
       });
     });
@@ -1142,7 +1146,7 @@
     delete $('#itemStay').dataset.saved;
     $('#itemFixedStart').value = it.fixedStart || '';
     $('#itemFixedEnd').value = it.fixedEnd || '';
-    const first = day().items[0] === it;
+    const first = day().items[0] === it && !model.days[S.state.dayIndex].rows[0].carry; // 전날 체류가 이어지면 하루 시작은 그 종료 시각
     const hint = '시작·종료·체류 중 두 개를 정하면 나머지는 자동으로 계산해요. 정한 시작보다 일찍 도착하면 그 시각까지 기다려요.';
     $('#itemTimeHint').textContent = first && !it.fixedStart && !it.fixedEnd ? `시각을 비우면 ${day().startTime}(자동)에 시작해요. ${hint}` : hint;
     showItemError('');
@@ -1224,14 +1228,15 @@
   };
 
   function openLegDialog(itemId) {
-    const d = day();
-    const i = d.items.findIndex((x) => x.id === itemId);
-    if (i < 1) return;
-    const it = d.items[i];
-    const leg = P.computeLeg(d.items[i - 1], { ...it, legMin: null, legCost: null }, settings(), 0); // 자동 계산값(placeholder)과 이동수단 확인용
+    // 출발 장소는 계산된 행에서 가져온다 (첫 장소의 출발지가 전날에서 이어진 체류일 수 있다)
+    const row = model.days[S.state.dayIndex].rows.find((r) => !r.carry && r.item.id === itemId && r.leg);
+    if (!row) return;
+    const it = row.item;
+    const from = row.leg.from;
+    const leg = P.computeLeg(from, { ...it, legMin: null, legCost: null }, settings(), 0); // 자동 계산값(placeholder)과 이동수단 확인용
     editingLegId = itemId;
     const [label, help] = LEG_COST_HELP[leg.mode] || LEG_COST_HELP.transit;
-    $('#legDialogSub').textContent = `${d.items[i - 1].name} → ${it.name}`;
+    $('#legDialogSub').textContent = `${from.name} → ${it.name}`;
     const set = it.legMin != null;
     $('#legHour').value = set ? Math.floor(it.legMin / 60) : '';
     $('#legMin').value = set ? it.legMin % 60 : '';
@@ -1803,13 +1808,15 @@
     if (!window.Sortable) return;
     Sortable.create($('#itemList'), {
       handle: '.drag-handle',
+      draggable: '.item:not(.carry)', // 전날에서 이어진 체류 행은 데이터에 없으므로 끌 수 없고, 그 앞으로 놓을 수도 없다
+      onMove: (evt) => !(evt.related.classList.contains('carry') && !evt.willInsertAfter),
       animation: 150,
       ghostClass: 'drag-ghost',
       onStart: () => { dragging = true; },
       onEnd: (evt) => {
         dragging = false;
         pendingRender = false;
-        if (evt.oldIndex !== evt.newIndex && evt.oldIndex != null) reorder(evt.oldIndex, evt.newIndex);
+        if (evt.oldDraggableIndex !== evt.newDraggableIndex && evt.oldDraggableIndex != null) reorder(evt.oldDraggableIndex, evt.newDraggableIndex);
         renderAll(); // 순서가 바뀌었으니 구간/시간/비용을 다시 계산
       },
     });

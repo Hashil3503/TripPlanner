@@ -128,8 +128,11 @@
   const ROUTE_TYPE_LABEL = { BUS: '버스', SUBWAY: '지하철', BUS_AND_SUBWAY: '버스+지하철' };
   const routeTypeLabel = (route) => ROUTE_TYPE_LABEL[route.type] || '대중교통';
 
-  /** 하루 일정: 각 장소의 도착/출발 시각과 구간, 합계 */
-  function buildDay(day, dayIndex, settings) {
+  const samePlace = (a, b) => Math.abs(a.lat - b.lat) < 1e-4 && Math.abs(a.lon - b.lon) < 1e-4; // 약 10m 이내
+
+  /** 하루 일정: 각 장소의 도착/출발 시각과 구간, 합계.
+   *  carry: 전날 마지막 장소의 체류가 자정을 넘기면 { item, until(이 날 0시 기준 분) } -> 그 장소를 맨 앞 행으로 이어 붙이고 체류가 끝나는 시각에 하루를 시작한다 */
+  function buildDay(day, dayIndex, settings, carry) {
     const rows = [];
     let clock = parseTime(day.startTime);
     let prev = null;
@@ -139,6 +142,12 @@
       legCount: 0, failedLegs: 0, unknownCostLegs: 0, loadingLegs: 0, waitMin: 0, lateCount: 0, end: clock, late: false,
     };
     const people = Math.max(1, Math.round(settings.people || 1));
+    // 다음 날 첫 장소가 이미 같은 장소(사용자가 직접 넣은 숙소 등)면 중복으로 붙이지 않는다
+    if (carry && !(day.items[0] && samePlace(day.items[0], carry.item))) {
+      clock = carry.until;
+      prev = carry.item;
+      rows.push({ item: carry.item, carry: true, est: 0, arrival: 0, departure: clock, leg: null, waitMin: 0, lateMin: 0, endLateMin: 0, late: clock >= 1440 });
+    }
 
     for (const item of day.items) {
       let leg = null;
@@ -193,7 +202,14 @@
 
   /** 여행 전체 */
   function buildTrip(trip, settings) {
-    const days = trip.days.map((d, i) => buildDay(d, i, settings));
+    const days = [];
+    let carry = null;
+    trip.days.forEach((d, i) => {
+      const dm = buildDay(d, i, settings, carry);
+      const last = dm.rows[dm.rows.length - 1];
+      carry = last && last.departure > 1440 ? { item: last.item, until: last.departure - 1440 } : null;
+      days.push(dm);
+    });
     const people = Math.max(1, Math.round(settings.people || 1));
     const totals = {
       travelMin: 0, distance: 0, transport: 0, extra: 0, total: 0, people,
@@ -210,7 +226,7 @@
       totals.failedLegs += s.failedLegs;
       totals.unknownCostLegs += s.unknownCostLegs;
       totals.loadingLegs += s.loadingLegs;
-      totals.items += d.rows.length;
+      totals.items += d.rows.filter((r) => !r.carry).length;
       for (const m of MODE_IDS) totals.byMode[m] += s.byMode[m];
     }
     totals.perPerson = totals.total / people;

@@ -932,3 +932,6 @@ fieldset .hint { margin: 0; }
 .view-row { justify-content: space-between; }
 .view-row .switch { margin-left: auto; }
 .view-row .legs-toggle { margin-left: -8px; } /* ghost 버튼 안쪽 여백만큼 당겨 좌측 정렬선 맞춤 */
+
+/* 전날에서 이어진 체류(자동, 편집 불가) */
+.item.carry .item-card { border-style: dashed; opacity: 0.85; cursor: default; }
