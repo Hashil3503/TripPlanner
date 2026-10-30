@@ -161,7 +161,7 @@ a { color: var(--accent-text); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
-.num, .item-times, .leg-info, .tile-value, .bar-value, .day-row, .popup-sub { font-variant-numeric: tabular-nums; }
+.num, .item-times, .tile-value, .bar-value, .day-row, .popup-sub { font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 ::selection { background: var(--ring); }
@@ -505,33 +505,25 @@ body[data-view='main'] .trip-only { display: none !important; }
 .trip-btn:disabled .chev { display: none; }
 .item, .leg { scroll-margin-top: 96px; }
 .item { position: relative; }
-.stop { position: relative; padding-left: 40px; }
+.stop { position: relative; }
+/* 장소 번호: 카드 안 왼쪽. 구간 선(.leg-line)이 이 원의 가로 중앙(카드 왼쪽에서 25px)을 지나도록 맞춘다 */
 .node {
-  position: absolute; left: 0; top: calc(50% - 14px); z-index: 1; /* 카드 세로 중앙 (transform은 :active 축소에 쓰므로 top으로 맞춘다) */
-  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  align-self: center; flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin-right: 6px; border-radius: 50%;
   background: var(--day); color: var(--day-ink); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
-  box-shadow: 0 0 0 4px var(--bg-panel);
 }
-/* 타임라인 선: 구간 A→B의 선은 하나의 접기/펴기 컨트롤.
-   .leg-line(구간 행 전체 높이)과 노드 위아래 .line-seg 조각이 같은 x에 이어져 한 색으로 보이고, 호버/포커스 시 함께 굵어진다. */
-.line-seg, .leg-line { position: absolute; left: 0; width: 28px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.line-seg { z-index: 0; }
-.line-seg.in { top: 0; height: 50%; }
-.line-seg.out { top: 50%; bottom: 0; }
-.leg-line { top: 0; bottom: 0; }
-.line-seg::before, .leg-line::before {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 12px; width: 4px;
+/* 타임라인 선: 구간 A→B의 선(앞 카드 아래 → 다음 카드 위)은 하나의 접기/펴기 컨트롤이고, 호버/포커스 시 굵어진다 */
+.leg-line { position: absolute; top: 0; bottom: 0; left: 0; width: 40px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.leg-line::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 23px; width: 4px;
   background: var(--leg, var(--day)); transition: left 0.15s, width 0.15s;
 }
-.line-seg.in::before { background: var(--prev-leg, var(--day)); }
-.line-seg.out::before { background: var(--next-leg, var(--day)); }
-.line-seg.hot::before, .leg-line.hot::before { left: 10px; width: 8px; }
+.leg-line.hot::before { left: 21px; width: 8px; }
 .leg-line:focus-visible { outline: none; }
 .leg-line:focus-visible::before { box-shadow: 0 0 0 2px var(--bg-panel), 0 0 0 4px var(--text-2); }
-@media (prefers-reduced-motion: reduce) { .line-seg::before, .leg-line::before { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .leg-line::before { transition: none; } }
 
 .item-card {
-  position: relative; display: flex; align-items: flex-start; gap: 4px; padding: 12px 8px 12px 4px;
+  position: relative; display: flex; align-items: flex-start; gap: 4px; padding: 12px 4px 12px 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -601,38 +593,65 @@ body[data-view='main'] .trip-only { display: none !important; }
 }
 .leg-pane-in { min-height: 0; overflow: clip; overflow-clip-margin: 4px; }
 .leg-content { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; }
-/* 접힌 행: 타임라인 위의 가벼운 한 줄 */
+/* 접힌 행: 타임라인 위의 두 줄 (이동수단·시간·비용 / 노선·태그·바로가기) */
 .leg-summary {
-  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; margin: 4px 0; padding: 0 6px 0 8px;
+  display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 4px 0; padding: 4px 6px 4px 8px;
   border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
   font-size: 13px; text-align: left; font-variant-numeric: tabular-nums;
 }
-.leg-summary .leg-mode-ico { width: 16px; height: 16px; }
-.leg-sum-text { min-width: 0; font-weight: 600; color: var(--text); white-space: nowrap; }
+.leg-sum-top, .leg-sum-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.grow { flex: 1 1 auto; }
+.leg-sum-dur, .leg-sum-cost { font-size: 14px; font-weight: 700; color: var(--text); }
+.leg-sum-range { font-size: 11px; color: var(--warn); }
+.leg-sum-dist { font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .leg-summary .tag.loading { padding-left: 0; }
-.leg-warn { display: inline-flex; flex: none; color: var(--warn); }
-.leg-warn .icon { width: 14px; height: 14px; }
-.leg-info-row { display: flex; align-items: flex-start; gap: 8px; }
-.leg-info-row .leg-info { flex: 1; min-width: 0; }
-.leg-top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
-.leg-modes > button { height: 28px; min-width: 30px; padding: 0 7px; gap: 4px; font-size: 12px; }
-.leg-modes .icon { width: 15px; height: 15px; }
-.leg-modes > button.active .icon { color: var(--mode); }
+.leg-warn { flex: none; font-size: 11px; color: var(--muted); text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; } /* '범위'(주의 색)와 구분되는 회색, 점선은 툴팁이 있다는 표시 */
+
+/* 이동수단 선택 (접힌 행 · 펼친 카드 공용) */
+.mode-select {
+  height: 28px; padding: 0 26px 0 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 8px;
+  background-color: var(--surface); background-position: right 6px center; color: var(--text-2); flex: none;
+}
+.mode-select.pill {
+  border-radius: 999px; border-color: transparent; background-color: var(--accent-soft);
+  color: var(--accent-text); font-weight: 700;
+}
+
+/* 펼친 카드 */
+.leg-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.leg-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 12px 14px; overflow-wrap: anywhere; }
+.leg-card-head > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.leg-card-head > .leg-card-cost-col { align-items: flex-end; text-align: right; }
+.leg-card-dur { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.leg-card-cost { font-size: 16px; font-weight: 700; }
+.leg-card-sec, .leg-card-foot { border-top: 1px solid var(--border); padding: 10px 14px; }
+.leg-card-sec.leg-detail { font-size: 12px; color: var(--muted); }
+.leg-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px; }
+.muted-s { font-size: 12px; color: var(--muted); }
+
+/* 탑승 구간 */
+.leg-steps { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.leg-steps .step { display: flex; align-items: flex-start; gap: 8px; }
+.step-main { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.step-badge {
+  flex: none; padding: 2px 7px; border-radius: 5px; font-weight: 700; font-size: 11px; line-height: 1.4;
+  background: var(--surface-2); color: var(--muted);
+}
+.step-badge.bus { background: var(--pill-bus-bg); color: var(--pill-bus-fg); }
+.step-badge.subway { background: var(--pill-subway-bg); color: var(--pill-subway-fg); }
+.step-badge.walk { background: var(--pill-walk-bg); color: var(--pill-walk-fg); }
+.step-lines { font-weight: 700; color: var(--text); }
+.step-sub { display: block; color: var(--muted); }
+
+/* 카드 아래 동작 줄 */
+.leg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 8px; font-size: 12px; }
+.leg-actions .ext-link { padding: 0; }
 .m-walk { --mode: var(--m-walk); } .m-bike { --mode: var(--m-bike); } .m-transit { --mode: var(--m-transit); }
 .m-taxi { --mode: var(--m-taxi); } .m-car { --mode: var(--m-car); } .m-extra { --mode: var(--m-extra); }
 .icon.m-walk, .icon.m-bike, .icon.m-transit, .icon.m-taxi, .icon.m-car, .icon.m-extra { color: var(--mode); }
-.auto-btn { font-size: 12px; color: var(--muted); }
-.leg-info { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; font-size: 13px; color: var(--text-2); }
-.leg-stat + .leg-stat::before { content: '·'; margin: 0 6px; color: var(--muted); font-weight: 400; }
-.leg-stat.cost { font-weight: 700; color: var(--text); }
-.leg-info .tag { margin-left: 8px; }
-.leg-detail { font-size: 12px; color: var(--muted); }
-.leg-edit-row { display: flex; }
-.leg-edit { font-size: 12px; margin-left: -4px; }
+.leg-edit { font-size: 12px; }
 .leg-edit .icon { width: 13px; height: 13px; }
 .leg-edit.strong { font-weight: 700; font-size: 13px; }
-.leg-transit { display: flex; flex-direction: column; gap: 6px; }
-.leg-route { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
 .route-pills { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .pill-sep { width: 12px; height: 12px; color: var(--muted); }
 .line-pill {
@@ -645,9 +664,6 @@ body[data-view='main'] .trip-only { display: none !important; }
 .line-pill.bus { height: auto; min-height: 22px; padding-block: 4px; white-space: normal; overflow-wrap: anywhere; } /* 묶인 노선이 많으면 줄바꿈 */
 .line-pill.walk { background: var(--pill-walk-bg); color: var(--pill-walk-fg); }
 .line-pill.has-color { background: var(--pill-bg); color: var(--pill-fg); }
-.route-meta { color: var(--muted); font-size: 12px; }
-.leg-alt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
-.alt-select { max-width: 100%; height: 30px; padding: 0 28px 0 10px; font-size: 12px; border-radius: 8px; background-position: right 8px center; }
 .ext-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--accent-text); text-decoration: none; padding: 4px 0; }
 .ext-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .ext-link .icon { width: 13px; height: 13px; }
@@ -774,6 +790,17 @@ dialog::backdrop { background: var(--scrim); }
 .dialog-form label { min-width: 0; }
 .dialog-form label input, .dialog-form label select, .dialog-form label textarea { width: 100%; }
 .form-error { margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--danger-soft); color: var(--danger); font-size: 13px; font-weight: 500; }
+
+/* 경로 선택: 후보를 카드로 늘어놓고 하나를 고른다 (라디오는 화면에서만 숨김) */
+.route-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow: auto; }
+label.route-opt {
+  position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; font-size: 13px; font-weight: 400; color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer;
+}
+.route-opt input[type='radio'] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.route-opt:has(input:checked) { border: 2px solid var(--accent); padding: 11px; } /* 테두리가 두꺼워진 만큼 안쪽 여백을 줄여 흔들림 방지 */
+.route-opt:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.route-opt-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-variant-numeric: tabular-nums; }
 .auth-tabs { margin-bottom: 4px; }
 .auth-tabs > button { height: 36px; }
 
@@ -894,11 +921,8 @@ fieldset .hint { margin: 0; }
   .switch, .menu-item { min-height: 40px; }
   .inline input[type='number'], .inline input[type='time'], input[type='text'], input[type='number'], select { height: 40px; }
   .seg > button { height: 40px; }
-  .leg-modes > button { height: 40px; min-width: 40px; }
-  .leg-modes .icon { width: 17px; height: 17px; }
-  .alt-select { height: 40px; }
+  .mode-select { height: 34px; font-size: 13px; }
   .ext-link { min-height: 40px; }
-  .auto-btn { min-height: 40px; }
   .link { min-height: 32px; }
   .search-box { height: 46px; }
   .search .hint { display: none; }
@@ -907,7 +931,7 @@ fieldset .hint { margin: 0; }
   .drag-handle { width: 24px; }
   .day-head .btn:not(.legs-toggle) span { display: none; }
   .day-head .btn:not(.legs-toggle) { width: 40px; padding: 0; }
-  .leg-summary { min-height: 40px; margin: 0; }
+  .leg-summary { padding-top: 6px; padding-bottom: 6px; }
   .dialog-form label input, .dialog-form label select { height: 44px; font-size: 16px; }
   .dlg-foot .btn { height: 44px; }
   dialog { width: calc(100vw - 16px); }
@@ -924,9 +948,9 @@ fieldset .hint { margin: 0; }
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
 @media (max-width: 767px) {
-  .line-seg, .leg-line { width: 36px; left: -4px; } /* 터치 영역 36px (선 위치는 그대로) */
-  .line-seg::before, .leg-line::before { left: 16px; }
-  .line-seg.hot::before, .leg-line.hot::before { left: 14px; }
+  .leg-line { width: 48px; left: -4px; } /* 터치 영역을 넓히되 선 위치는 그대로 */
+  .leg-line::before { left: 27px; }
+  .leg-line.hot::before { left: 25px; }
 }
 /* 일괄 접기/펴기(좌) · 전체 일차 지도 표시(우) */
 .view-row { justify-content: space-between; }

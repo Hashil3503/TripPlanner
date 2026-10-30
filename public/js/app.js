@@ -373,7 +373,7 @@
         }
       },
     }, [
-      row.carry ? null : el('span', { class: 'drag-handle', title: '끌어서 순서 변경', 'aria-label': '끌어서 순서 변경' }, icon('grip')),
+      buildNode(idx),
       el('div', { class: 'item-body' }, [
         el('div', { class: 'item-title' }, [UI.catIcon(item.category), el('span', { class: 'name', text: item.name })]),
         el('div', { class: 'item-times' + (row.late ? ' late' : '') }, [
@@ -388,45 +388,23 @@
         el('button', { type: 'button', class: 'icon-btn sm', title: '수정', 'aria-label': `${item.name} 수정`, onclick: (e) => { e.stopPropagation(); openItemDialog(item.id); } }, icon('pencil')),
         el('button', { type: 'button', class: 'icon-btn sm danger', title: '삭제', 'aria-label': `${item.name} 삭제`, onclick: (e) => { e.stopPropagation(); deleteItem(item.id); } }, icon('trash')),
       ]),
+      row.carry ? null : el('span', { class: 'drag-handle', title: '끌어서 순서 변경', 'aria-label': '끌어서 순서 변경' }, icon('grip')),
     ]);
 
-    // 구간 순서: 첫 장소를 뺀 모든 장소에 들어오는 구간이 있으므로 들어오는 구간은 idx - 1, 나가는 구간은 idx
-    const next = dm.rows[idx + 1];
-    const last = idx === dm.rows.length - 1;
+    // 구간 순서: 첫 장소를 뺀 모든 장소에 들어오는 구간이 있으므로 들어오는 구간은 idx - 1
     return el('li', {
       class: 'item' + (row.carry ? ' carry' : '') + (item.id === selectedId ? ' selected' : '') + (row.late ? ' over-midnight' : ''),
       title: row.carry ? '전날 마지막 장소의 체류가 자정을 넘겨 자동으로 이어 붙였어요. 수정은 전날 일정에서 해요' : null,
-      // 장소 옆 타임라인 선도 들어오는/나가는 구간 색으로 이어지게
-      style: (idx > 0 ? `--prev-leg:${legColorOf(dm.dayIndex, idx - 1)};` : '') + (last ? '' : `--next-leg:${legColorOf(dm.dayIndex, idx)}`),
       dataset: { id: item.id },
     }, [
       row.leg ? buildLeg(row.leg, item, legColorOf(dm.dayIndex, idx - 1), idx) : null,
-      el('div', { class: 'stop' }, [
-        // 노드 위아래 타임라인 선: 눌러서 해당 구간을 접고 펴는 클릭 영역 (키보드는 구간의 .leg-line 버튼이 맡는다)
-        row.leg ? lineSeg('in', legKey(item.id)) : null,
-        next && next.leg ? lineSeg('out', legKey(next.item.id)) : null,
-        buildNode(idx),
-        card,
-      ]),
+      el('div', { class: 'stop' }, card),
     ]);
   }
 
-  /** 타임라인 노드 (표시 전용) */
+  /** 장소 번호 (카드 안 왼쪽, 표시 전용) */
   function buildNode(idx) {
     return el('span', { class: 'node', text: String(idx + 1) });
-  }
-
-  /** 노드 위(in)/아래(out)의 선 조각. 같은 구간의 .leg-line과 data-line-for를 공유해 함께 강조된다. */
-  function lineSeg(dir, key) {
-    return el('div', {
-      class: 'line-seg ' + dir,
-      'aria-hidden': 'true',
-      dataset: { lineFor: key },
-      onclick: () => {
-        const legEl = document.querySelector(`#itemList .leg[data-key="${CSS.escape(key)}"]`);
-        if (legEl) toggleLeg(legEl);
-      },
-    });
   }
 
   /** 같은 구간(A→B)의 선 조각 전체를 함께 굵게 */
@@ -453,26 +431,6 @@
   const rangeText = (min, max) => `${Math.round(min).toLocaleString('ko-KR')}~${won(max)}`;
   const RANGE_PICK_LABEL = { 0: '최소값', 0.5: '중간값', 1: '최대값' };
   const rangePickLabel = () => RANGE_PICK_LABEL[TP.fare.snapRangePick(settings().transit.rangePick)];
-
-  function legCostText(leg) {
-    const c = leg.cost;
-    if (c.unknown) return '요금 미정';
-    const people = settings().people;
-    const share = people > 1 ? ` (1인 ${won(c.perPerson)})` : '';
-    switch (leg.mode) {
-      case 'walk':
-      case 'bike':
-        return '0원';
-      case 'transit':
-        return `${won(c.total)}${share}` + (leg.transitReal && leg.transitReal.fareRange ? ` · 요금 ${rangeText(leg.transitReal.fareRange.min, leg.transitReal.fareRange.max)}` : '');
-      case 'taxi':
-        return `${won(c.total)}${share}`;
-      case 'car':
-        return `${won(c.total)}${share}`;
-      default:
-        return '';
-    }
-  }
 
   const legKey = (itemId) => trip().id + ':' + itemId;
   const isLegCollapsed = (itemId) => {
@@ -543,48 +501,115 @@
   const INTERCITY_HINT = '카카오 대중교통은 도시 간 경로(KTX·고속버스 등)를 알려주지 않아요. 시간·요금을 직접 입력해 주세요';
   const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요';
 
-  function buildLeg(leg, item, color, idx) {
-    const modes = MODES.map((m) => {
-      const on = m.id === leg.mode;
-      return el('button', {
-        type: 'button',
-        class: `seg-btn m-${m.id}` + (on ? ' active' : ''),
-        title: m.label,
-        'aria-label': m.label,
-        'aria-pressed': String(on),
-        onclick: () => setMode(item.id, m.id),
-      }, [UI.modeIcon(m.id), on ? el('span', { class: 'seg-label', text: m.label }) : null]);
-    });
+  /** 이동수단 선택: 고른 수단으로 바꾸고, '자동 선택'은 거리 기준으로 되돌린다 */
+  function modeSelect(leg, item, cls) {
+    const opts = MODES.map((m) => el('option', { value: m.id, text: m.label }));
+    if (!leg.auto) opts.push(el('option', { value: 'auto', text: '자동 선택 (거리 기준)' }));
+    const sel = el('select', { class: 'mode-select' + (cls ? ' ' + cls : ''), 'aria-label': '이동수단' }, opts);
+    sel.value = leg.mode;
+    sel.addEventListener('change', () => setMode(item.id, sel.value === 'auto' ? null : sel.value));
+    return sel;
+  }
 
-    const tags = [];
+  const STEP_BADGE = { BUS: '버스', SUBWAY: '지하철', WALKING: '도보' };
+  const stepBadgeCls = (type) => (type === 'BUS' ? 'bus' : type === 'SUBWAY' ? 'subway' : type === 'WALKING' ? 'walk' : 'etc');
+  const toMin = (sec) => Math.ceil(sec / 60 - 1e-9);
+
+  /** 출발지 → 첫 정류장, 마지막 정류장 → 도착지 도보(초). 카카오는 이 둘을 단계로 주지 않고 전체 시간에만 넣으므로 차이로 유추한다 (대기 시간이 섞였을 수 있어 화면에는 '약') */
+  const accessSec = (route) => Math.max(0, route.totalTime - route.steps.reduce((n, s) => n + (s.time || 0), 0));
+
+  /** 출발·도착 도보(초)를 출발지→첫 정류장, 마지막 정류장→도착지 직선거리 비율로 나눈다. 좌표가 없으면 null */
+  function splitAccess(route, from, to) {
+    const rides = route.steps.filter((s) => s.path && s.path.length);
+    if (!from || !to || !rides.length) return null;
+    const pt = (p) => ({ lat: p[0], lon: p[1] });
+    const first = rides[0].path[0];
+    const lastPath = rides[rides.length - 1].path;
+    const d1 = TP.routing.haversine(from, pt(first));
+    const d2 = TP.routing.haversine(pt(lastPath[lastPath.length - 1]), to);
+    const total = accessSec(route);
+    const r = d1 + d2 > 0 ? d1 / (d1 + d2) : 0.5;
+    return { start: total * r, end: total * (1 - r) };
+  }
+
+  /** 경로 단계: 배지 + 노선 + (승차 → 하차 · N정류장 · M분). 환승 도보는 단계로 오고,
+   *  출발·도착 도보는 단계로 오지 않아 전체 시간에서 유추해 앞뒤에 '약'으로 붙인다 (from/to가 없으면 합계 한 줄) */
+  function buildSteps(route, from, to) {
+    const step = (type, main, sub) => el('div', { class: 'step' }, [
+      el('span', { class: 'step-badge ' + stepBadgeCls(type), text: STEP_BADGE[type] || '기타' }),
+      el('div', { class: 'step-main' }, [
+        el('strong', { class: 'step-lines', text: main }),
+        sub.length ? el('span', { class: 'step-sub', text: sub.join(' · ') }) : null,
+      ]),
+    ]);
+    const rows = route.steps.map((s) => {
+      if (s.type === 'WALKING') {
+        const sub = [];
+        if (s.distance > 0) sub.push(F.fmtDist(s.distance));
+        if (s.guidance.includes('환승')) sub.push('환승');
+        return step('WALKING', `도보 ${toMin(s.time)}분`, sub);
+      }
+      const sub = [];
+      if (s.firstStop && s.lastStop) sub.push(`${s.firstStop} → ${s.lastStop}`);
+      if (s.stopCount > 0) sub.push(`${s.stopCount}정류장`);
+      if (s.time > 0) sub.push(`${toMin(s.time)}분`);
+      return step(s.type, s.type === 'BUS' ? (s.vehicles || []).join(' · ') : P.stepName(s), sub);
+    });
+    const split = splitAccess(route, from, to);
+    const rideOf = (s) => s && s.type !== 'WALKING';
+    const firstRide = route.steps.find(rideOf);
+    const lastRide = [...route.steps].reverse().find(rideOf);
+    if (split) {
+      const a = toMin(split.start);
+      const b = toMin(split.end);
+      if (a > 0) rows.unshift(step('WALKING', `도보 약 ${a}분`, [`${from.name} → ${firstRide && firstRide.firstStop ? firstRide.firstStop : '승차 정류장'}`]));
+      if (b > 0) rows.push(step('WALKING', `도보 약 ${b}분`, [`${lastRide && lastRide.lastStop ? lastRide.lastStop : '하차 정류장'} → ${to.name}`]));
+    } else {
+      const access = toMin(accessSec(route));
+      if (access > 0) rows.push(step('WALKING', `출발·도착 도보 약 ${access}분`, ['출발지→첫 정류장, 마지막 정류장→도착지']));
+    }
+    return el('div', { class: 'leg-steps' }, rows);
+  }
+
+  /** 경로의 도보 시간(분, 올림): 환승 도보 + 출발·도착 도보 = 전체 시간 - 탑승 시간 */
+  function walkMin(route) {
+    const ride = route.steps.filter((s) => s.type !== 'WALKING').reduce((n, s) => n + (s.time || 0), 0);
+    return toMin(Math.max(0, route.totalTime - ride));
+  }
+
+  function buildLeg(leg, item, color, idx) {
+    const tagDefs = [];
     const notes = []; // 접힌 행의 경고 아이콘에 담을 안내
-    if (leg.loading) tags.push(el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']));
+    // 태그 DOM은 접힌 행과 펼친 카드 두 곳에 필요하므로 정의만 모아 두고 그릴 때마다 새로 만든다
+    const tag = (cls, text, title, children) => tagDefs.push({ cls, text, title, children });
+    const buildTags = () => tagDefs.map((t) => el('span', { class: 'tag' + (t.cls ? ' ' + t.cls : ''), title: t.title, text: t.text }, t.children));
+    if (leg.loading) tag('loading', null, null, [el('span', { class: 'spinner' }), ' 계산 중…']);
     else if (leg.estimated) {
-      tags.push(el('span', { class: 'tag warn', text: '추정(직선거리 기반)' }));
+      tag('warn', '추정(직선거리 기반)');
       notes.push('추정(직선거리 기반)');
     }
     if (leg.transit) {
-      tags.push(el('span', { class: 'tag', title: leg.fallbackReason || '', text: '대중교통 추정' }));
+      tag('', '대중교통 추정', leg.fallbackReason || '');
       if (!(leg.override.min && leg.override.cost)) notes.push('대중교통 추정'); // 시간·요금을 모두 직접 입력했으면 접힌 행 경고는 생략
     }
     if (leg.cost.unknown) {
       const t = leg.interCity ? '도시 간 · 요금 미정' : '요금 미정';
-      tags.push(el('span', { class: 'tag warn', title: leg.interCity ? INTERCITY_HINT : NOFARE_HINT, text: t }));
+      tag('warn', t, leg.interCity ? INTERCITY_HINT : NOFARE_HINT);
       notes.push(t);
     }
     if (leg.override.min || leg.override.cost) {
       const what = leg.override.min && leg.override.cost ? '시간·요금' : leg.override.min ? '시간' : '요금';
-      tags.push(el('span', { class: 'tag accent', title: `${what}을 직접 입력한 값이에요`, text: '직접 입력' }));
+      tag('accent', '직접 입력', `${what}을 직접 입력한 값이에요`);
       notes.push(`${what} 직접 입력`);
     }
     if (leg.transitReal && leg.transitReal.fareRange) {
       const fr = leg.transitReal.fareRange;
-      tags.push(el('span', { class: 'tag', title: `카카오가 요금을 ${rangeText(fr.min, fr.max)} 범위로 알려줘 합계에는 ${rangePickLabel()}을 반영했어요`, text: '요금 범위' }));
+      tag('', '요금 범위', `카카오가 요금을 ${rangeText(fr.min, fr.max)} 범위로 알려줘 합계에는 ${rangePickLabel()}을 반영했어요`);
       notes.push(`요금 범위(${rangePickLabel()} 반영)`);
     }
     if (leg.cost.surchargeRate > 0) {
       const t = `심야할증 +${Math.round(leg.cost.surchargeRate * 100)}%`;
-      tags.push(el('span', { class: 'tag warn', text: t }));
+      tag('warn', t);
       notes.push(t);
     }
 
@@ -599,13 +624,60 @@
       details.push(leg.fallbackReason);
     }
 
-    const top = [el('div', { class: 'seg leg-modes', role: 'group', 'aria-label': '이동수단' }, modes)];
-    if (!leg.auto) top.push(el('button', { type: 'button', class: 'link auto-btn', title: '거리에 따라 자동 선택', text: '자동 선택', onclick: () => setMode(item.id, null) }));
-
     const bodyId = 'leg-body-' + item.id;
     const modeLabel = (MODES.find((m) => m.id === leg.mode) || {}).label || '';
     const summaryText = `${F.fmtDuration(leg.durationMin)} · ${legCostShort(leg)}`;
     const warnText = notes.join(', ');
+    const tr = leg.transitReal;
+    const people = Math.max(1, Math.round(settings().people || 1));
+    const noCost = leg.mode === 'walk' || leg.mode === 'bike';
+    const fr = tr && tr.fareRange;
+
+    // 접힌 행: (이동수단·시간·비용) + (노선/거리·태그·바로가기) 두 줄
+    const sumSub = [];
+    if (tr) sumSub.push(UI.routePills(tr.route));
+    else sumSub.push(el('span', { class: 'leg-sum-dist', text: F.fmtDist(leg.distance) }), ...buildTags().filter((n) => !n.classList.contains('loading')));
+    sumSub.push(el('span', { class: 'grow' }));
+    if (tr) {
+      sumSub.push(el('button', {
+        type: 'button', class: 'link leg-more', text: '경로 상세',
+        onclick: (e) => { e.stopPropagation(); toggleLeg(e.currentTarget.closest('.leg')); },
+      }));
+    } else {
+      sumSub.push(el('button', {
+        type: 'button', class: 'link', text: leg.override.min || leg.override.cost ? '직접 입력 수정' : '직접 입력',
+        onclick: () => openLegDialog(item.id),
+      }));
+    }
+
+    // 펼친 카드: 헤드(시간·거리·비용) + 탑승 단계 + 태그/경로 선택
+    const subLine = [];
+    if (fr && !leg.override.cost) subLine.push(`${rangeText(fr.min * people, fr.max * people)} · ${rangePickLabel()} 반영`);
+    else if (people > 1 && !leg.cost.unknown && !noCost) subLine.push(`1인 ${won(leg.cost.perPerson)}`);
+    const footTags = buildTags();
+    if (tr) footTags.push(el('span', { class: 'tag', text: tr.route.transfers > 0 ? `환승 ${tr.route.transfers}회` : '환승 없음' }));
+    const foot = footTags.length > 0 || (tr && tr.routes.length > 1);
+    const cardKids = [
+      el('div', { class: 'leg-card-head' }, [
+        el('div', {}, [
+          el('span', { class: 'muted-s', text: `${modeLabel} · ${F.fmtDist(leg.distance)}` }),
+          el('strong', { class: 'leg-card-dur', text: F.fmtDuration(leg.durationMin) }),
+        ]),
+        el('div', { class: 'leg-card-cost-col' }, [
+          el('strong', { class: 'leg-card-cost', text: leg.cost.unknown ? '요금 미정' : noCost ? '0원' : won(leg.cost.total) }),
+          subLine.length ? el('span', { class: 'muted-s', text: subLine.join(' · ') }) : null,
+        ]),
+      ]),
+      tr ? el('div', { class: 'leg-card-sec' }, buildSteps(tr.route, leg.from, leg.to)) : details.length ? el('div', { class: 'leg-card-sec leg-detail', text: details.join(' · ') }) : null,
+      tr && details.length ? el('div', { class: 'leg-card-sec leg-detail', text: details.join(' · ') }) : null,
+      foot ? el('div', { class: 'leg-card-foot' }, [
+        ...footTags,
+        el('span', { class: 'grow' }),
+        tr && tr.routes.length > 1 ? el('button', { type: 'button', class: 'link', text: `경로 ${tr.routes.length}개 중 선택`, onclick: () => openRouteDialog(item.id) }) : null,
+      ]) : null,
+    ];
+
+    const editText = leg.override.min || leg.override.cost ? '직접 입력 수정' : leg.cost.unknown ? '직접 입력' : '시간·요금 직접 입력';
 
     // 구간 영역 전체가 토글: 선 버튼(키보드 포함)이나 빈 곳을 누르면 접고 편다. 안쪽의 다른 컨트롤과 텍스트 선택은 제외
     const legEl = el('div', {
@@ -630,59 +702,39 @@
         'data-label': `${idx}→${idx + 1} 이동 정보`,
         'data-sum': `: ${modeLabel} ${summaryText}` + (leg.loading ? ', 계산 중' : '') + (warnText ? `, ${warnText}` : ''),
       }),
-      // 접힌 상태: 이동수단 아이콘 + 시간 · 비용 (+ 경고). 누를 수 없는 요약 행
+      // 접힌 상태: 두 줄 요약 (이동수단·시간·비용 / 노선·태그·바로가기)
       el('div', { class: 'leg-pane leg-pane-min' }, el('div', { class: 'leg-pane-in' },
         el('div', { class: 'leg-summary' }, [
-          UI.modeIcon(leg.mode, `leg-mode-ico m-${leg.mode}`),
-          el('span', { class: 'leg-sum-text', text: summaryText }),
-          leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']) : null,
-          warnText ? el('span', { class: 'leg-warn', title: warnText }, icon('alert')) : null,
+          el('div', { class: 'leg-sum-top' }, [
+            modeSelect(leg, item, 'pill'),
+            el('strong', { class: 'leg-sum-dur', text: F.fmtDuration(leg.durationMin) }),
+            el('span', { class: 'grow' }),
+            el('strong', { class: 'leg-sum-cost', text: legCostShort(leg) }),
+            fr && !leg.override.cost ? el('span', { class: 'leg-sum-range', title: '요금 범위', text: '범위' }) : null,
+            leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']) : null,
+            warnText ? el('span', { class: 'leg-warn', title: warnText, text: '추정' }) : null, // 자세한 사유는 마우스를 올리면 보인다
+          ]),
+          el('div', { class: 'leg-sum-sub' }, sumSub),
         ]))),
-      // 펼친 상태: 기존 상세 내용
+      // 펼친 상태: 요약 카드 + 탑승 단계 + 편집/지도 링크
       el('div', { class: 'leg-pane leg-pane-full', id: bodyId }, el('div', { class: 'leg-pane-in' },
         el('div', { class: 'leg-content' }, [
-          el('div', { class: 'leg-top' }, top),
-          el('div', { class: 'leg-info-row' }, [
-            el('div', { class: 'leg-info' }, [
-              el('span', { class: 'leg-stat', text: F.fmtDuration(leg.durationMin) }),
-              el('span', { class: 'leg-stat', text: F.fmtDist(leg.distance) }),
-              el('span', { class: 'leg-stat cost', text: legCostText(leg) }),
-              ...tags,
-            ]),
+          el('div', { class: 'leg-card' }, cardKids),
+          el('div', { class: 'leg-actions' }, [
+            el('span', { class: 'muted-s', text: '이동수단' }),
+            modeSelect(leg, item, ''),
+            el('span', { class: 'grow' }),
+            el('button', {
+              type: 'button',
+              class: 'link leg-edit' + (leg.cost.unknown ? ' strong' : ''),
+              onclick: () => openLegDialog(item.id),
+            }, [icon('pencil'), editText]),
+            tr && tr.landingURL ? el('a', { class: 'ext-link', href: tr.landingURL, target: '_blank', rel: 'noopener' }, ['카카오맵', icon('external')]) : null,
           ]),
-          leg.transitReal ? buildTransitRoute(leg.transitReal, item) : null,
-          details.length ? el('div', { class: 'leg-detail', text: details.join(' · ') }) : null,
-          el('div', { class: 'leg-edit-row' }, el('button', {
-            type: 'button',
-            class: 'link leg-edit' + (leg.cost.unknown ? ' strong' : ''),
-            onclick: () => openLegDialog(item.id),
-          }, [icon('pencil'), leg.override.min || leg.override.cost ? '직접 입력 수정' : leg.cost.unknown ? '직접 입력' : '시간·요금 직접 입력'])),
         ]))),
     ]);
     applyLegDom(legEl, isLegCollapsed(item.id));
     return legEl;
-  }
-
-  /** 대중교통 실경로: 노선 배지 + 대안 경로 선택 + 카카오맵 링크 */
-  function buildTransitRoute(tr, item) {
-    const r = tr.route;
-    const label = (x, i) => {
-      const fare = x.fare != null ? won(x.fare) : x.fareMin != null && x.fareMax != null ? rangeText(x.fareMin, x.fareMax) : '요금 미상';
-      return `${P.routeTypeLabel(x)} ${F.fmtDuration(Math.ceil(x.totalTime / 60 - 1e-9))} ${fare}` + (x.transfers > 0 ? ` · 환승 ${x.transfers}회` : '') + (i === tr.defaultIdx ? ' (최단)' : '');
-    };
-    const row = [];
-    if (tr.routes.length > 1) {
-      const sel = el('select', { class: 'alt-select', title: '다른 대중교통 경로 선택', 'aria-label': '대중교통 경로 선택' },
-        tr.routes.map((x, i) => el('option', { value: String(i), text: label(x, i) })));
-      sel.value = String(tr.idx);
-      sel.addEventListener('change', () => setTransitIdx(item.id, Number(sel.value)));
-      row.push(sel);
-    }
-    if (tr.landingURL) row.push(el('a', { class: 'ext-link', href: tr.landingURL, target: '_blank', rel: 'noopener' }, ['카카오맵에서 보기', icon('external')]));
-    return el('div', { class: 'leg-transit' }, [
-      el('div', { class: 'leg-route' }, [UI.routePills(r), el('span', { class: 'route-meta', text: r.transfers > 0 ? `환승 ${r.transfers}회` : '환승 없음' })]),
-      row.length ? el('div', { class: 'leg-alt' }, row) : null,
-    ]);
   }
 
   // ---- 요약 ----
@@ -1248,6 +1300,50 @@
     $('#legDialog').showModal();
   }
 
+  let editingRouteId = null;
+
+  /** 대중교통 경로 선택 다이얼로그: 후보 경로를 라디오로 보여주고 고른 경로로 바꾼다 */
+  function openRouteDialog(itemId) {
+    const row = model.days[S.state.dayIndex].rows.find((r) => !r.carry && r.item.id === itemId && r.leg && r.leg.transitReal);
+    if (!row) return;
+    const tr = row.leg.transitReal;
+    editingRouteId = itemId;
+    $('#routeDialogSub').textContent = `${row.leg.from.name} → ${row.item.name}`;
+    $('#routeList').replaceChildren(...tr.routes.map((r, i) => {
+      const fare = r.fare != null ? won(r.fare) : r.fareMin != null && r.fareMax != null ? rangeText(r.fareMin, r.fareMax) : '요금 미상';
+      const walk = walkMin(r);
+      const radio = el('input', { type: 'radio', name: 'routePick', value: String(i) });
+      radio.checked = i === tr.idx;
+      return el('label', { class: 'route-opt' }, [
+        radio,
+        el('div', { class: 'route-opt-head' }, [
+          el('strong', { text: F.fmtDuration(Math.ceil(r.totalTime / 60 - 1e-9)) }),
+          i === tr.defaultIdx ? el('span', { class: 'tag accent', text: '최단' }) : null,
+          el('span', { class: 'grow' }),
+          el('strong', { text: fare }),
+        ]),
+        el('span', { class: 'muted-s', text: `${P.routeTypeLabel(r)} · ${r.transfers > 0 ? `환승 ${r.transfers}회` : '환승 없음'}` + (walk > 0 ? ` · 도보 ${walk}분` : '') }),
+        buildSteps(r, row.leg.from, row.item),
+      ]);
+    }));
+    const kakao = $('#routeKakao');
+    if (tr.landingURL) {
+      kakao.href = tr.landingURL;
+      kakao.hidden = false;
+    } else {
+      kakao.removeAttribute('href');
+      kakao.hidden = true;
+    }
+    $('#routeDialog').showModal();
+  }
+
+  function submitRoute() {
+    const picked = $('#routeList').querySelector('input[name="routePick"]:checked');
+    const id = editingRouteId;
+    $('#routeDialog').close();
+    if (picked && id) setTransitIdx(id, Number(picked.value));
+  }
+
   function submitLeg(clear) {
     const it = day().items.find((x) => x.id === editingLegId);
     if (!it) return $('#legDialog').close();
@@ -1774,6 +1870,7 @@
     $('#tripStart').addEventListener('input', () => { syncTripDates(true); showTripError(''); });
     $('#tripEnd').addEventListener('input', () => { syncTripDates(false); showTripError(''); });
     $('#legForm').addEventListener('submit', (e) => { e.preventDefault(); submitLeg(false); });
+    $('#routeForm').addEventListener('submit', (e) => { e.preventDefault(); submitRoute(); });
     $('#btnLegClear').addEventListener('click', () => submitLeg(true));
     $('#itemForm').addEventListener('submit', (e) => { e.preventDefault(); submitItem(); });
     $('#settingsForm').addEventListener('submit', (e) => { e.preventDefault(); submitSettings(); });

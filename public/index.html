@@ -320,6 +320,25 @@
     </form>
   </dialog>
 
+  <!-- 대중교통 경로 선택 -->
+  <dialog id="routeDialog" aria-labelledby="routeDialogTitle">
+    <form id="routeForm" method="dialog" class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="routeDialogTitle">대중교통 경로 선택</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <p class="hint" id="routeDialogSub"></p>
+        <div id="routeList" class="route-list" role="radiogroup" aria-label="대중교통 경로"></div>
+      </div>
+      <footer class="dlg-foot">
+        <a id="routeKakao" class="ext-link" target="_blank" rel="noopener" hidden>카카오맵에서 보기</a>
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit">이 경로 선택</button>
+      </footer>
+    </form>
+  </dialog>
+
   <!-- 일정 항목 편집 -->
   <dialog id="itemDialog" aria-labelledby="itemDialogTitle">
     <form id="itemForm" method="dialog" class="dialog-form">
