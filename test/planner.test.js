@@ -277,3 +277,8 @@ test('legColor: 전체 표시면 일차 색, 한 일차만 보이면 구간 순�
   for (let i = 0; i < LEG_COLORS.length * 2; i++) assert.notEqual(legColor('#000', i, false), legColor('#000', i + 1, false));
   assert.equal(new Set(LEG_COLORS).size, LEG_COLORS.length);
 });
+
+test('stepName: 버스는 묶인 노선 번호를 모두 보여준다', () => {
+  assert.equal(P.stepName({ type: 'BUS', guidance: '', vehicles: ['6015', '6701', 'N6701(심야)'] }), '6015·6701·N6701(심야)');
+  assert.equal(P.stepName({ type: 'SUBWAY', guidance: '', vehicles: ['1호선', '4호선', '공항철도'] }), '1호선·4호선');
+});

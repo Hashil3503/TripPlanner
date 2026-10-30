@@ -642,6 +642,7 @@ body[data-view='main'] .trip-only { display: none !important; }
 .line-pill .icon { width: 12px; height: 12px; stroke-width: 2; }
 .line-pill.subway { background: var(--pill-subway-bg); color: var(--pill-subway-fg); }
 .line-pill.bus { background: var(--pill-bus-bg); color: var(--pill-bus-fg); }
+.line-pill.bus { height: auto; min-height: 22px; padding-block: 4px; white-space: normal; overflow-wrap: anywhere; } /* 묶인 노선이 많으면 줄바꿈 */
 .line-pill.walk { background: var(--pill-walk-bg); color: var(--pill-walk-fg); }
 .line-pill.has-color { background: var(--pill-bg); color: var(--pill-fg); }
 .route-meta { color: var(--muted); font-size: 12px; }
