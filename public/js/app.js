@@ -1743,6 +1743,7 @@
     $('#showAll').addEventListener('change', (e) => {
       S.state.showAll = e.target.checked;
       S.save();
+      renderSchedule(); // 사이드바 구간 색도 showAll에 따라 달라진다 (legColorOf)
       renderMap(true);
     });
 
