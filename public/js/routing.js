@@ -20,7 +20,7 @@
   const TRANSIT_TIMEOUT_MS = 15000;
   const NO_ROUTE_REASON = '대중교통 경로 없음(도시 간 이동·너무 가까운 거리 등)';
 
-  // 이동수단 -> 프로필. 대중교통은 카카오(서버) 조회, 택시/자가용은 OSRM 자동차 경로. 대중교통 조회에 실패하면 자동차 경로로 추정한다.
+  // 이동수단 -> 프로필. 대중교통은 카카오(서버) 조회, 택시/자가용은 OSRM 자동차 경로. 대중교통 조회에 실패하면 2km 이하는 도보, 초과는 자동차 경로로 시간을 추정.
   const profileFor = (mode) => (mode === 'walk' ? 'foot' : mode === 'bike' ? 'bike' : mode === 'transit' ? 'transit' : 'car');
 
   function haversine(a, b) {
@@ -184,10 +184,17 @@
 
   const isFresh = (f) => !!f && (f.permanent || Date.now() - f.t < FAIL_TTL_MS);
 
-  /** 대중교통 조회 실패 시 대체 경로: 자동차 도로 경로(없으면 직선거리)로 추정. reason은 화면에 표시된다. */
+  /** 대중교통 경로가 없을 때 시간을 잴 프로필: 직선거리 2km(est.noRouteWalkKm) 이하는 도보, 초과는 자동차 */
+  function fallbackProfile(a, b, settings) {
+    const est = (settings || TP.store.state.settings).est;
+    return haversine(a, b) <= est.noRouteWalkKm * 1000 ? 'foot' : 'car';
+  }
+
+  /** 대중교통 조회 실패 시 대체 경로: 2km 이하는 도보, 초과는 자동차 경로(없으면 직선거리)로 추정. reason은 화면에 표시된다. */
   function transitFallback(a, b, reason) {
-    const base = memory.get(key(a, b, 'car')) || estimateRoute(a, b, 'car');
-    return { distance: base.distance, duration: base.duration, geometry: base.geometry, estimated: base.estimated, fallbackReason: reason };
+    const pf = fallbackProfile(a, b);
+    const base = memory.get(key(a, b, pf)) || estimateRoute(a, b, pf);
+    return { distance: base.distance, duration: base.duration, geometry: base.geometry, estimated: base.estimated, fallbackReason: reason, fallbackBy: pf === 'foot' ? 'walk' : 'car' };
   }
 
   /** 캐시된 결과 (성공 캐시 -> 최근 실패 시 추정값 -> null) */
@@ -197,8 +204,8 @@
     const f = failed.get(k);
     if (profile === 'transit') {
       if (!isFresh(f)) return null;
-      // 대체용 자동차 경로가 아직 오는 중이면 조금 더 기다린다 (loading)
-      const ck = key(a, b, 'car');
+      // 대체용 경로(2km 이하 도보 / 초과 자동차)가 아직 오는 중이면 조금 더 기다린다 (loading)
+      const ck = key(a, b, fallbackProfile(a, b));
       if (!memory.has(ck) && !isFresh(failed.get(ck))) return null;
       return transitFallback(a, b, f.reason);
     }
@@ -277,7 +284,7 @@
     }
   }
 
-  /** 대중교통 조회: 실패(경로 없음/키 없음/오류)하면 자동차 경로 기반 추정으로 대체. 항상 resolve */
+  /** 대중교통 조회: 실패(경로 없음/키 없음/오류)하면 2km 이하 도보·초과 자동차 경로 기반 추정으로 대체. 항상 resolve */
   function getTransit(a, b, priority) {
     const k = key(a, b, 'transit');
     if (memory.has(k)) return Promise.resolve(memory.get(k));
@@ -299,7 +306,7 @@
           failed.set(k, { t: Date.now(), reason, permanent: e instanceof TransitFail && e.permanent });
         }
       }
-      await get(a, b, 'car', priority); // 대체 추정에 쓸 도로 경로 (큐 밖에서 호출해 교착을 피한다)
+      await get(a, b, fallbackProfile(a, b), priority); // 대체 추정에 쓸 도보/자동차 경로 (큐 밖에서 호출해 교착을 피한다)
       return transitFallback(a, b, reason);
     })().finally(() => pending.delete(k));
     pending.set(k, p);
@@ -331,5 +338,5 @@
   const isPending = (a, b, profile) => pending.has(key(a, b, profile));
   const clearFailures = () => failed.clear();
 
-  TP.routing = { profileFor, haversine, key, peek, get, isPending, estimateRoute, clearFailures, NO_ROUTE_REASON };
+  TP.routing = { profileFor, fallbackProfile, haversine, key, peek, get, isPending, estimateRoute, clearFailures, NO_ROUTE_REASON };
 })();

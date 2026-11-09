@@ -53,7 +53,7 @@
     const profile = TP.routing.profileFor(mode);
     let route = TP.routing.peek(prev, item, profile);
     const loading = !route;
-    if (!route) route = TP.routing.estimateRoute(prev, item, profile, settings);
+    if (!route) route = TP.routing.estimateRoute(prev, item, mode === 'transit' ? TP.routing.fallbackProfile(prev, item, settings) : profile, settings);
 
     let seconds = route.duration;
     let distance = route.distance;
@@ -61,7 +61,6 @@
     let fare = null;
     let fareMin = null;
     let fareMax = null;
-    let interCity = false; // 대중교통 실경로 없이 도시 간 거리 -> 시간은 자동차 기준, 요금 미정
     if (mode === 'transit') {
       const tr = route.transit;
       if (tr && tr.routes.length) {
@@ -75,20 +74,17 @@
         distance = chosen.totalDistance;
         fare = chosen.fare;
         if (real.fareRange) { fareMin = real.fareRange.min; fareMax = real.fareRange.max; }
-      } else {
-        // 실경로를 못 받으면(경로 없음/키 없음/오류) 자동차 도로거리로 추정
-        interCity = !loading && route.distance / 1000 > settings.est.interCityKm;
-        // 도시 간 거리는 시내 평균 속도 공식이 맞지 않아 자동차 소요시간을 쓰고, 요금은 미정으로 둔다
-        seconds = interCity ? route.duration : (route.distance / 1000 / settings.est.transitSpeed) * 3600 + settings.est.transitOverheadMin * 60;
       }
+      // 실경로를 못 받으면(경로 없음/키 없음/오류) 대체 경로(2km 이하 도보, 초과 자동차)의 시간을 그대로 쓴다. 요금은 미정
     }
     // 사용자 직접 입력(구간의 도착 장소에 저장): 시간·요금 각각 있으면 자동 계산 대신 사용
     const ovMin = Number.isInteger(item.legMin) && item.legMin >= 0;
     const ovCost = Number.isInteger(item.legCost) && item.legCost >= 0;
     const durationMin = ovMin ? item.legMin : Math.ceil(seconds / 60 - 1e-9);
-    // 실경로인데 카카오가 요금을 아예 안 준 경우(예: 심야 공항버스+지하철)도 거리 기반 시내 요금으로 추정하지 않고 미정으로 둔다
+    // 실경로를 못 받은 대중교통 구간은 요금 미정(직접 입력하면 반영). 실경로인데 카카오가 요금을 아예 안 준 경우도 미정
     const noFare = Boolean(real && !real.fareKnown && !real.fareRange);
-    const cost = TP.fare.legCost({ mode, distanceM: distance, depMin, parking: item.parking, fare, fareMin, fareMax, tollKm: route.tollKm, override: ovCost ? item.legCost : null, unknown: (interCity || noFare) && !ovCost }, settings);
+    const unknownTransit = mode === 'transit' && !real;
+    const cost = TP.fare.legCost({ mode, distanceM: distance, depMin, parking: item.parking, fare, fareMin, fareMax, tollKm: route.tollKm, override: ovCost ? item.legCost : null, unknown: (unknownTransit || noFare) && !ovCost }, settings);
     return {
       from: prev,
       to: item,
@@ -98,15 +94,16 @@
       distance,
       durationMin,
       depMin,
-      cost, // cost.unknown: 요금 미정 (도시 간 이동 또는 카카오 요금 없음, 합계 제외)
-      interCity, // 대중교통 조회 실패 + 도로거리 > est.interCityKm
+      cost, // cost.unknown: 요금 미정 (대중교통 실경로 없음 또는 카카오 요금 없음, 합계 제외)
+      noRoute: mode === 'transit' && !real && !loading && route.fallbackReason === TP.routing.NO_ROUTE_REASON, // 카카오가 대중교통 경로 없음(NO_RESULTS)이라고 답함. false이고 transit이면 조회 실패
       noFare, // 대중교통 실경로이지만 카카오가 요금을 주지 않음
       override: { min: ovMin, cost: ovCost }, // 사용자 직접 입력 여부
       geometry: route.geometry,
       estimated: route.estimated, // 경로 조회 실패 -> 직선거리 기반 추정
-      transit: mode === 'transit' && !real, // 대중교통 추정값 (실경로를 못 받은 경우)
+      transit: mode === 'transit' && !real, // 대중교통 실경로 없음(경로 없음/조회 실패)
       transitReal: real, // 대중교통 실경로: { routes, idx, defaultIdx, route, landingURL, fareKnown, fareRange }
       fallbackReason: route.fallbackReason || '', // 대중교통 추정으로 대체된 이유
+      fallbackBy: route.fallbackBy || null, // 대중교통 실경로 없음: 'walk'|'car' (시간을 잰 기준)
       loading,
     };
   }
@@ -159,7 +156,7 @@
         stats.transport += leg.cost.total;
         stats.byMode[leg.mode] += leg.cost.total;
         stats.legCount++;
-        if (leg.cost.unknown) stats.unknownCostLegs++;
+        if (leg.cost.unknown && !leg.loading) stats.unknownCostLegs++;
         if (leg.loading) stats.loadingLegs++;
         else if (leg.estimated) stats.failedLegs++;
       }

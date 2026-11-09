@@ -441,8 +441,9 @@
   /** 접힌 행의 짧은 비용 (걷기/자전거는 0원) */
   /** 접힌 행 비용: 요금 범위 경로는 합계 기준값 대신 범위(인원 합)를 보여준다 */
   function legCostShort(leg) {
-    if (leg.cost.unknown) return '요금 미정';
     if (leg.mode === 'walk' || leg.mode === 'bike') return '0원';
+    if (leg.loading) return '—'; // 조회 중에는 요금 미정으로 단정하지 않는다
+    if (leg.cost.unknown) return '요금 미정';
     const fr = leg.transitReal && leg.transitReal.fareRange;
     if (fr && !leg.override.cost) {
       const people = Math.max(1, Math.round(settings().people || 1));
@@ -498,7 +499,8 @@
   }
 
   /** 장소 사이의 이동 구간: 타임라인 위의 가벼운 연결 행. 접으면 한 줄(이동수단·시간·비용)만 남는다. */
-  const INTERCITY_HINT = '카카오 대중교통은 도시 간 경로(KTX·고속버스 등)를 알려주지 않아요. 시간·요금을 직접 입력해 주세요';
+  const FALLBACK_HINT = '시간은 거리 2km 이하면 도보, 넘으면 자동차 기준으로 계산했고, 요금은 직접 입력해 주세요';
+  const NOROUTE_HINT = '카카오가 대중교통 경로를 찾지 못했어요. ' + FALLBACK_HINT;
   const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요';
 
   /** 이동수단 선택: 고른 수단으로 바꾸고, '자동 선택'은 거리 기준으로 되돌린다 */
@@ -595,16 +597,20 @@
       mark('추정', '추정(직선거리 기반)');
     }
     // 시간·요금을 모두 직접 입력했으면 화면의 값은 추정이 아니므로 태그·표시 모두 붙이지 않는다
-    if (leg.transit && !(leg.override.min && leg.override.cost)) {
-      tag('', '대중교통 추정', leg.fallbackReason || '');
-      notes.push('대중교통 추정');
-      mark('추정', '대중교통 추정');
-    }
-    if (leg.cost.unknown) {
-      const t = leg.interCity ? '도시 간 · 요금 미정' : '요금 미정';
-      tag('warn', t, leg.interCity ? INTERCITY_HINT : NOFARE_HINT);
+    if (leg.transit && !leg.loading && leg.fallbackReason && !(leg.override.min && leg.override.cost)) {
+      const t = leg.noRoute ? '경로 없음' : '조회 실패';
+      tag('warn', t, leg.noRoute ? NOROUTE_HINT : `${leg.fallbackReason} ${FALLBACK_HINT}`);
       notes.push(t);
       mark('미정', t);
+      const BY_TEXT = leg.fallbackBy === 'walk' ? '시간은 도보 기준' : '시간은 자동차 기준';
+      notes.push(t);
+      if (!leg.override.cost) mark('미정', t);
+      if (!leg.override.min) mark('추정', BY_TEXT);
+    }
+    if (leg.cost.unknown && !leg.transit && !leg.loading) {
+      tag('warn', '요금 미정', NOFARE_HINT);
+      notes.push('요금 미정');
+      mark('미정', '요금 미정');
     }
     if (leg.override.min || leg.override.cost) {
       const what = leg.override.min && leg.override.cost ? '시간·요금' : leg.override.min ? '시간' : '요금';
@@ -632,7 +638,7 @@
     } else if (leg.mode === 'taxi' && settings().people > 1) {
       details.push('택시 요금은 인원이 나눠 낸다고 가정');
     } else if (leg.transit && leg.fallbackReason) {
-      details.push(leg.fallbackReason);
+      details.push(leg.fallbackBy === 'walk' ? '시간은 도보 기준이에요' : '시간은 자동차 기준이에요');
     }
 
     const bodyId = 'leg-body-' + item.id;
@@ -675,7 +681,7 @@
           el('strong', { class: 'leg-card-dur', text: F.fmtDuration(leg.durationMin) }),
         ]),
         el('div', { class: 'leg-card-cost-col' }, [
-          el('strong', { class: 'leg-card-cost', text: leg.cost.unknown ? '요금 미정' : noCost ? '0원' : won(leg.cost.total) }),
+          el('strong', { class: 'leg-card-cost', text: leg.loading ? (noCost ? '0원' : '—') : leg.cost.unknown ? '요금 미정' : noCost ? '0원' : won(leg.cost.total) }),
           subLine.length ? el('span', { class: 'muted-s', text: subLine.join(' · ') }) : null,
         ]),
       ]),
@@ -828,8 +834,8 @@
       bars.length ? el('div', { class: 'bars' }, bars) : el('p', { class: 'muted small', text: '아직 계산된 비용이 없어요.' }),
       el('h4', { text: '일차별 합계' }),
       el('div', { class: 'day-rows' }, dayRows),
-      ...(t.unknownCostLegs ? [el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(t.unknownCostLegs)} (도시 간 이동은 요금을 직접 입력해 주세요)`])] : []),
-      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)이며, 조회가 안 되면 추정값입니다(도시 간 이동은 요금 미정으로 두고 합계에서 제외해요). 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 추정치이고 통행료(고속도로)는 포함되지 않습니다. 자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
+      ...(t.unknownCostLegs ? [el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(t.unknownCostLegs)} (이동 구간의 직접 입력으로 채울 수 있어요)`])] : []),
+      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)입니다. 경로를 찾지 못한 구간은 시간을 도보(2km 이하) 또는 자동차 기준으로 계산하고 요금은 미정으로 두어 합계에서 제외해요. 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 서울 중형택시 기준 추정치이고 통행료(고속도로)는 포함되지 않습니다. 자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
     );
   }
 
@@ -1382,17 +1388,15 @@
       ],
     },
     {
-      group: '대중교통 추정 (1인, 교통카드 · 조회 실패 시 추정에만 사용)',
+      group: '자가용',
       fields: [
-        { path: 'transit.baseFare', label: '기본요금', unit: '원', min: 0, step: 50 },
-        { path: 'transit.baseKm', label: '기본요금 적용 거리', unit: 'km', min: 0, step: 1 },
-        { path: 'transit.stepKm', label: '추가요금 단위 거리 (기본~상한)', unit: 'km', min: 0.5, step: 0.5 },
-        { path: 'transit.stepFee', label: '단위당 추가요금', unit: '원', min: 0, step: 50 },
-        { path: 'transit.stepMaxKm', label: '추가요금 구간 상한', unit: 'km', min: 0, step: 1 },
-        { path: 'transit.farStepKm', label: '상한 초과 단위 거리', unit: 'km', min: 0.5, step: 0.5 },
-        { path: 'transit.farStepFee', label: '상한 초과 단위 요금', unit: '원', min: 0, step: 50 },
+        { path: 'car.efficiency', label: '연비', unit: 'km/L', min: 0.5, step: 0.5 },
+        { path: 'car.fuelPrice', label: '유가', unit: '원/L', min: 0, step: 10 },
       ],
     },
+  ];
+
+  const FIXED_SCHEMA = [
     {
       group: '택시 (서울 중형)',
       fields: [
@@ -1405,10 +1409,8 @@
       ],
     },
     {
-      group: '자가용',
+      group: '고속도로 통행료 (1종)',
       fields: [
-        { path: 'car.efficiency', label: '연비', unit: 'km/L', min: 0.5, step: 0.5 },
-        { path: 'car.fuelPrice', label: '유가', unit: '원/L', min: 0, step: 10 },
         { path: 'car.tollBase', label: '고속도로 통행료 기본요금', unit: '원', min: 0, step: 100 },
         { path: 'car.tollPerKm', label: '고속도로 통행료 km당 요금', unit: '원/km', min: 0, step: 0.1 },
       ],
@@ -1417,9 +1419,7 @@
       group: '이동 시간 추정',
       fields: [
         { path: 'est.autoWalkKm', label: '자동 선택: 도보 기준 거리', unit: 'km', min: 0, step: 0.1 },
-        { path: 'est.interCityKm', label: '도시 간 이동으로 볼 거리 (대중교통 조회 실패 시)', unit: 'km', min: 1, step: 5 },
-        { path: 'est.transitSpeed', label: '대중교통 평균 속도', unit: 'km/h', min: 1, step: 1 },
-        { path: 'est.transitOverheadMin', label: '대중교통 대기·환승 시간', unit: '분', min: 0, step: 1 },
+        { path: 'est.noRouteWalkKm', label: '대중교통 경로 없을 때 도보로 계산할 거리', unit: 'km' },
         { path: 'est.walk', label: '도보 속도 (조회 실패 시)', unit: 'km/h', min: 0.5, step: 0.5 },
         { path: 'est.bike', label: '자전거 속도 (조회 실패 시)', unit: 'km/h', min: 1, step: 1 },
         { path: 'est.car', label: '자동차 속도 (조회 실패 시)', unit: 'km/h', min: 1, step: 1 },
@@ -1453,7 +1453,24 @@
           ])
         ),
       ])
-    ));
+    ), el('fieldset', {}, [
+      el('legend', { text: '요금 추정 기준' }),
+      el('p', { class: 'hint', text: '택시 비용은 서울 요금 기준으로 추정해요. 대중교통 경로를 찾지 못한 구간은 시간을 도보(2km 이하) 또는 자동차 기준으로 계산하고 요금은 미정으로 둬요. 실제 금액은 구간에서 직접 입력할 수 있어요.' }),
+      el('details', { class: 'fixed-settings' }, [
+        el('summary', { text: '추정 기준 보기' }),
+        ...FIXED_SCHEMA.map((g) =>
+          el('div', { class: 'fixed-group' }, [
+            el('div', { class: 'fixed-group-title', text: g.group }),
+            ...g.fields.map((f) =>
+              el('div', { class: 'field-row' }, [
+                el('span', { text: f.label }),
+                el('span', { class: 'field-fixed', text: `${round4(getPath(TP.fare.DEFAULT_CONFIG, f.path) * (f.scale || 1)).toLocaleString('ko-KR')} ${f.unit}` }),
+              ])
+            ),
+          ])
+        ),
+      ]),
+    ]));
   }
 
   function refreshKakaoStatus() {

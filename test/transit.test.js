@@ -59,12 +59,14 @@ test('legCost: 인원수만큼 곱함', () => {
   assert.strictEqual(c.total, 9900);
 });
 
-test('legCost: 단일 요금이 범위보다 우선, 둘 다 없거나 잘못된 범위면 거리 추정', () => {
+test('legCost: 단일 요금이 범위보다 우선, 둘 다 없거나 잘못된 범위면 요금 미정', () => {
   assert.strictEqual(F.legCost({ ...opts, fare: 1550 }, cfg(1)).perPerson, 1550);
-  const est = F.transitFare(5);
-  assert.strictEqual(F.legCost({ mode: 'transit', distanceM: 5000 }, cfg(1)).perPerson, est);
-  assert.strictEqual(F.legCost({ mode: 'transit', distanceM: 5000, fareMin: 3000, fareMax: 2000 }, cfg(1)).perPerson, est);
-  assert.strictEqual(F.legCost({ mode: 'transit', distanceM: 5000, fareMin: null, fareMax: null }, cfg(1)).perPerson, est);
+  for (const o of [{ mode: 'transit', distanceM: 5000 }, { mode: 'transit', distanceM: 5000, fareMin: 3000, fareMax: 2000 }, { mode: 'transit', distanceM: 5000, fareMin: null, fareMax: null }]) {
+    const c = F.legCost(o, cfg(1));
+    assert.strictEqual(c.unknown, true);
+    assert.strictEqual(c.perPerson, 0);
+    assert.strictEqual(c.total, 0);
+  }
 });
 
 test('snapRangePick: 0 / 0.5 / 1 로 보정', () => {

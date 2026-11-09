@@ -15,7 +15,7 @@ const RATE_MAX = 60;
 const RATE_WINDOW_MS = 60 * 1000;
 
 const MSG = {
-  noKey: '대중교통 실시간 조회를 쓰려면 서버에 카카오 REST API 키(환경변수 TP_KAKAO_REST_KEY)를 설정해 주세요. 지금은 추정값을 사용해요.',
+  noKey: '대중교통 실시간 조회를 쓰려면 서버에 카카오 REST API 키(환경변수 TP_KAKAO_REST_KEY)를 설정해 주세요.',
   badParams: '좌표 값이 올바르지 않아요 (sx, sy, ex, ey: 경도/위도 숫자)',
   auth: '카카오 REST API 키가 올바르지 않거나 권한이 없어요. 키와 카카오맵 사용 설정을 확인해 주세요.',
   quota: '카카오 대중교통 API 호출 한도를 초과했어요. 잠시 후 다시 시도해 주세요.',

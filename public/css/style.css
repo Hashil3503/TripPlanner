@@ -813,7 +813,12 @@ fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: flex; flex-d
 legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--text); }
 fieldset .hint { margin: 0; }
 #settingsFields { display: flex; flex-direction: column; gap: 20px; }
-.set-intro { margin: 0 !important; }
+.fixed-settings { display: flex; flex-direction: column; gap: 12px; }
+.fixed-settings > summary { padding: 4px 0; font-size: 13px; font-weight: 500; color: var(--text-2); cursor: pointer; }
+.fixed-group { display: flex; flex-direction: column; gap: 4px; }
+.fixed-group .field-row { display: flex; }
+.field-fixed { flex: none; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.fixed-group-title { margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .field-row { flex-direction: row !important; justify-content: space-between; align-items: center; gap: 16px !important; min-height: 44px; padding: 4px 0; border-bottom: 1px solid var(--border); font-weight: 400 !important; }
 .field-row > span:first-child { min-width: 0; }
 .field-input { display: inline-flex; align-items: center; gap: 8px; flex: none; }
