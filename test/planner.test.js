@@ -13,9 +13,11 @@ const TP = globalThis.TP;
 let route = null; // 테스트가 바꿔 끼우는 캐시 경로 (null = 아직 조회 전)
 TP.routing = {
   profileFor: (m) => (m === 'walk' ? 'foot' : m === 'bike' ? 'bike' : m === 'transit' ? 'transit' : 'car'),
+  fallbackProfile: () => 'car',
   haversine: () => 100000,
   peek: () => route,
   estimateRoute: () => ({ distance: 1000, duration: 60, geometry: [], estimated: true }),
+  NO_ROUTE_REASON: '대중교통 경로 없음(도시 간 이동·너무 가까운 거리 등)',
 };
 require('../public/js/planner.js');
 require('../public/js/storage.js');
@@ -24,27 +26,27 @@ const P = TP.planner;
 const cfg = (people = 1) => ({ ...fare.DEFAULT_CONFIG, people });
 const A = { lat: 37.55, lon: 126.97 };
 const item = (o) => ({ id: 'b', name: 'B', lat: 35.1, lon: 129.0, stay: 60, cost: 0, parking: 0, modeIn: 'transit', transitIdx: null, legMin: null, legCost: null, ...o });
-// 대중교통 조회 실패 후 자동차 경로로 대체된 상태 (서울 -> 부산 약 400km, 4시간 30분)
-const carFallback = (km = 400, sec = 16200) => ({ distance: km * 1000, duration: sec, geometry: [], estimated: false, fallbackReason: '경로 없음' });
+// 대중교통 조회 실패 후 대체 경로(도보/자동차) 상태 (서울 -> 부산 약 400km, 4시간 30분)
+const carFallback = (km = 400, sec = 16200) => ({ distance: km * 1000, duration: sec, geometry: [], estimated: false, fallbackReason: '경로 없음', fallbackBy: 'car' });
 
-test('도시 간 대중교통 대체: 시간은 자동차 기준, 요금은 미정', () => {
-  route = carFallback();
-  const leg = P.computeLeg(A, item(), cfg(2), 540);
-  assert.equal(leg.interCity, true);
-  assert.equal(leg.durationMin, 270);
-  assert.equal(leg.cost.unknown, true);
-  assert.equal(leg.cost.total, 0);
-  assert.equal(leg.cost.perPerson, 0);
-  assert.deepEqual(leg.override, { min: false, cost: false });
+test('대중교통 대체: 거리와 무관하게 대체 경로의 시간을 쓰고 요금은 미정', () => {
+  for (const [km, sec] of [[400, 16200], [30, 2400]]) {
+    route = carFallback(km, sec);
+    const leg = P.computeLeg(A, item(), cfg(2), 540);
+    assert.equal(leg.durationMin, Math.ceil(sec / 60));
+    assert.equal(leg.cost.unknown, true);
+    assert.equal(leg.cost.total, 0);
+    assert.equal(leg.cost.perPerson, 0);
+    assert.equal(leg.fallbackBy, 'car');
+    assert.deepEqual(leg.override, { min: false, cost: false });
+  }
 });
 
-test('도시 간 기준 이하면 기존 추정식(속도 + 오버헤드)', () => {
-  route = carFallback(30, 2400);
-  const leg = P.computeLeg(A, item(), cfg(), 540);
-  assert.equal(leg.interCity, false);
-  assert.equal(leg.cost.unknown, false);
-  assert.equal(leg.durationMin, Math.ceil((30 / 22) * 60 + 10 - 1e-9));
-  assert.ok(leg.cost.total > 0);
+test('noRoute: 카카오가 경로 없음이라고 답한 경우만 true', () => {
+  route = { ...carFallback(), fallbackReason: TP.routing.NO_ROUTE_REASON };
+  assert.equal(P.computeLeg(A, item(), cfg(), 540).noRoute, true);
+  route = { ...carFallback(), fallbackReason: '대중교통 정보를 불러오지 못했어요 (서버 연결 실패)' };
+  assert.equal(P.computeLeg(A, item(), cfg(), 540).noRoute, false);
 });
 
 test('직접 입력: 시간은 소요시간, 요금은 대중교통 1인 x 인원', () => {
@@ -98,11 +100,14 @@ test('카카오 실경로에 요금이 없으면 거리 추정 대신 미정 (�
   assert.equal(ranged.cost.total, 20500); // 기본: 최대값
 });
 
-test('조회 중(loading)에는 도시 간으로 판단하지 않는다', () => {
+test('조회 중(loading)에는 경로 없음으로 판단하지 않고 미정 구간으로 세지 않는다', () => {
   route = null;
   const leg = P.computeLeg(A, item(), cfg(), 540);
   assert.equal(leg.loading, true);
-  assert.equal(leg.interCity, false);
+  assert.equal(leg.noRoute, false);
+  const d = P.buildDay({ startTime: '09:00', items: [item({ id: 'a', modeIn: null, stay: 30 }), item()] }, 0, { ...fare.DEFAULT_CONFIG, people: 1 });
+  assert.equal(d.stats.loadingLegs, 1);
+  assert.equal(d.stats.unknownCostLegs, 0);
 });
 
 test('buildDay: 미정 구간은 합계에서 제외하고 개수를 센다, 직접 입력은 도착 시각에 반영', () => {

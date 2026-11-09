@@ -89,6 +89,25 @@ test('빈 상태 저장 후 다시 불러와도 비어 있고, 사용자 캐시�
   S.load(); // 이후 테스트를 위해 게스트 키로 복귀
 });
 
+test('load: 사용자 설정 4개만 저장값을 쓰고 나머지는 기본값', () => {
+  reset();
+  seed({
+    trips: [],
+    currentTripId: null,
+    settings: { people: 3, transit: { rangePick: 0 }, taxi: { baseFare: 9999 }, car: { fuelPrice: 2000, efficiency: 15, tollBase: 5000 }, est: { walk: 9, detour: 2 } },
+  });
+  S.load();
+  const st = S.state.settings;
+  assert.equal(st.people, 3);
+  assert.equal(st.transit.rangePick, 0);
+  assert.equal(st.car.fuelPrice, 2000);
+  assert.equal(st.car.efficiency, 15);
+  assert.equal(st.est.walk, TP.fare.DEFAULT_CONFIG.est.walk);
+  assert.equal(st.taxi.baseFare, TP.fare.DEFAULT_CONFIG.taxi.baseFare);
+  assert.equal(st.car.tollBase, TP.fare.DEFAULT_CONFIG.car.tollBase);
+  assert.equal(st.est.detour, TP.fare.DEFAULT_CONFIG.est.detour);
+});
+
 test('loadFromServer: 서버 여행이 0개면 빈 상태 (새 여행을 만들지 않는다)', () => {
   reset();
   S.loadFromServer('kim', [], null);

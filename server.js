@@ -440,7 +440,7 @@ server.listen(PORT, HOST, () => {
   if (PUBLIC_URLS.length) console.log(`서비스 주소(TP_PUBLIC_URL): ${PUBLIC_URLS.map((u) => u.origin).join(', ')}${TRUST_PROXY ? ' · 프록시 IP 신뢰' : ''}`);
   // 키 값은 출력하지 않고 설정 여부만 알린다
   console.log(`카카오 JavaScript 키(TP_KAKAO_JS_KEY): ${KAKAO_JS_KEY ? '설정됨' : '없음 - 지도를 표시할 수 없어요'}`);
-  console.log(`카카오 REST API 키(TP_KAKAO_REST_KEY): ${transit.hasKey() ? '설정됨' : '없음 - 대중교통은 추정치로 계산돼요'}`);
+  console.log(`카카오 REST API 키(TP_KAKAO_REST_KEY): ${transit.hasKey() ? '설정됨' : '없음 - 대중교통은 조회 실패로 표시돼요(시간은 도보/자동차 기준, 요금 미정)'}`);
   console.log('종료하려면 Ctrl+C 를 누르세요.');
 });
 

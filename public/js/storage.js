@@ -22,14 +22,16 @@
   const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 
   // 기본값 위에 저장된 값을 덮어쓰기 (숫자 설정만 허용)
-  function mergeSettings(base, saved) {
+  function mergeSettings(base, saved, prefix = '') {
     const out = {};
     for (const k of Object.keys(base)) {
-      if (isObj(base[k])) out[k] = mergeSettings(base[k], isObj(saved) ? saved[k] : null);
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (isObj(base[k])) out[k] = mergeSettings(base[k], isObj(saved) ? saved[k] : null, path);
       else {
         const v = isObj(saved) ? saved[k] : undefined;
-        out[k] = typeof v === 'number' && isFinite(v) ? v : base[k];
-        if (k === 'rangePick') out[k] = TP.fare.snapRangePick(out[k]); // 0 / 0.5 / 1만 허용
+        const editable = TP.fare.USER_SETTINGS.includes(path);
+        out[k] = editable && typeof v === 'number' && isFinite(v) ? v : base[k];
+        if (path === 'transit.rangePick') out[k] = TP.fare.snapRangePick(out[k]); // 0 / 0.5 / 1만 허용
       }
     }
     return out;

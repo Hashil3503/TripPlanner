@@ -6,17 +6,10 @@
   'use strict';
   const TP = (root.TP = root.TP || {});
 
-  // ---- 요금/추정 설정 (2025 서울 기준 기본값) ----
+  // ---- 요금/추정 설정 (2026 서울 기준 기본값) ----
   const DEFAULT_CONFIG = {
     people: 1, // 여행 인원
     transit: {
-      baseFare: 1550, // 기본요금(교통카드, 성인)
-      baseKm: 10, // 기본요금 적용 거리(km)
-      stepKm: 5, // 10km 초과 ~ 상한까지 추가요금 단위(km)
-      stepFee: 100, // 단위당 추가요금(원)
-      stepMaxKm: 50, // 이 거리까지는 5km당 추가
-      farStepKm: 8, // 상한 초과분은 8km당 추가
-      farStepFee: 100,
       rangePick: 1, // 카카오가 요금을 범위(최소~최대)로 줄 때 합계 기준: 0 = 최소, 0.5 = 중간값, 1 = 최대 (기본: 경비를 보수적으로 잡도록 최대)
     },
     taxi: {
@@ -29,7 +22,7 @@
     },
     car: {
       efficiency: 12, // 연비(km/L)
-      fuelPrice: 1700, // 유가(원/L)
+      fuelPrice: 1850, // 유가(원/L, 2026-11 휘발유 전국 평균)
       tollBase: 900, // 고속도로 통행료 기본요금(원, 1종 폐쇄식)
       tollPerKm: 44.3, // km당 주행요금(원, 1종)
     },
@@ -37,13 +30,14 @@
       walk: 4.5, // km/h (경로 조회 실패 시 추정용)
       bike: 15,
       car: 30,
-      transitSpeed: 22, // 대중교통 평균 속도(km/h)
-      transitOverheadMin: 10, // 대기/환승/도보 오버헤드(분)
       detour: 1.3, // 직선거리 -> 도로거리 보정 계수
       autoWalkKm: 1.2, // 자동 이동수단: 이 거리 이하면 도보
-      interCityKm: 40, // 대중교통 조회 실패 시, 도로거리가 이보다 길면 도시 간 이동으로 보고 요금을 미정 처리 (km)
+      noRouteWalkKm: 2, // 대중교통 경로가 없을 때 이 직선거리(km) 이하는 도보, 초과는 자동차 시간으로 계산
     },
   };
+
+  // 사용자가 바꿀 수 있는 설정 경로. 나머지는 코드 고정값(저장된 값 무시)
+  const USER_SETTINGS = ['people', 'car.efficiency', 'car.fuelPrice', 'transit.rangePick'];
 
   const MODES = [
     { id: 'walk', label: '도보', emoji: '🚶' },
@@ -56,22 +50,6 @@
   const roundTo = (n, unit) => Math.round(n / unit) * unit;
   // 부동소수점 오차(예: 10/5 = 2.0000000001)로 ceil이 튀지 않게 보정
   const ceilSafe = (x) => Math.ceil(x - 1e-9);
-
-  /** 대중교통 요금(1인, 원). distKm: 이동 거리(km)
-   *  - 10km 이내: 기본요금
-   *  - 10km 초과 ~ 50km: 5km마다 +100원 (올림)
-   *  - 50km 초과분: 8km마다 +100원 (올림)
-   */
-  function transitFare(distKm, cfg) {
-    const t = (cfg || DEFAULT_CONFIG).transit;
-    if (!(distKm > t.baseKm)) return t.baseFare;
-    const nearKm = Math.min(distKm, t.stepMaxKm) - t.baseKm;
-    let fare = t.baseFare + ceilSafe(nearKm / t.stepKm) * t.stepFee;
-    if (distKm > t.stepMaxKm) {
-      fare += ceilSafe((distKm - t.stepMaxKm) / t.farStepKm) * t.farStepFee;
-    }
-    return fare;
-  }
 
   /** 택시 심야 할증률. depMin: 출발 시각(자정 기준 분, 1440 이상이면 익일로 환산)
    *  22:00~23:00, 02:00~04:00 -> 20% / 23:00~02:00 -> 40% */
@@ -134,8 +112,8 @@
   }
 
   /** 한 구간의 비용.
-   * opts: { mode, distanceM, depMin, parking, fare, tollKm }  (fare: 대중교통 실제 1인 요금 - 있으면 거리 기반 추정 대신 사용,
-   *  fareMin/fareMax: 요금이 범위로 온 경우 - fare가 없을 때 rangePick 기준으로 사용,
+   * opts: { mode, distanceM, depMin, parking, fare, tollKm }  (fare: 대중교통 실제 1인 요금 - 있으면 그대로 사용,
+   *  fareMin/fareMax: 요금이 범위로 온 경우 - fare가 없을 때 rangePick 기준으로 사용. 둘 다 없으면 요금 미정(unknown),
    *  tollKm: 경로 중 고속도로 거리(km, 자가용 통행료 추정용),
    *  override: 사용자 직접 입력 요금(원) - 있으면 계산 대신 사용. 대중교통·도보·자전거는 1인 요금, 택시·자가용은 차량 1대 총액,
    *  unknown: true면 요금 미정(0원, 합계에서 제외))
@@ -167,7 +145,10 @@
       case 'transit': {
         let per = opts.fare != null && isFinite(opts.fare) ? opts.fare : null;
         if (per == null) per = rangeFare(opts.fareMin, opts.fareMax, cfg);
-        if (per == null) per = transitFare(distM / 1000, cfg);
+        if (per == null) {
+          out.unknown = true; // 거리로 요금을 추정하지 않는다
+          break;
+        }
         out.perPerson = per;
         out.total = per * people;
         break;
@@ -192,7 +173,7 @@
     return out;
   }
 
-  const fare = { DEFAULT_CONFIG, MODES, transitFare, taxiNightRate, taxiFare, fuelCost, tollRoadKm, tollFare, snapRangePick, rangeFare, legCost };
+  const fare = { DEFAULT_CONFIG, USER_SETTINGS, MODES, taxiNightRate, taxiFare, fuelCost, tollRoadKm, tollFare, snapRangePick, rangeFare, legCost };
   TP.fare = fare;
   if (typeof module !== 'undefined' && module.exports) module.exports = fare;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -8,7 +8,7 @@ globalThis.addEventListener = () => {};
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 require('../public/js/fare.js');
 const TP = globalThis.TP;
-TP.routing = { profileFor: () => 'car', haversine: () => 1000, peek: () => null, estimateRoute: () => ({ distance: 1, duration: 1, geometry: [], estimated: true }) };
+TP.routing = { profileFor: () => 'car', fallbackProfile: () => 'car', haversine: () => 1000, peek: () => null, estimateRoute: () => ({ distance: 1, duration: 1, geometry: [], estimated: true }) };
 require('../public/js/planner.js');
 require('../public/js/storage.js');
 require('../public/js/trips.js');
