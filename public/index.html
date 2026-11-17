@@ -364,9 +364,9 @@
         <p class="form-error" id="itemError" role="alert" hidden></p>
         <div class="grid2">
           <label>입장료/기타 (1인, 원)<input id="itemCost" type="number" min="0" step="100"></label>
-          <label>주차비 (총액, 원)<input id="itemParking" type="number" min="0" step="100"></label>
+          <label id="itemParkingField">주차비 (총액, 원)<input id="itemParking" type="number" min="0" step="100"></label>
         </div>
-        <p class="hint">주차비는 이 장소까지 <b>자가용</b>으로 이동할 때만 반영됩니다.</p>
+        <p class="hint" id="itemParkingHint">주차비는 이 장소까지 <b>자가용</b>으로 이동할 때만 반영됩니다.</p>
         <label>일차 이동<select id="itemDay"></select></label>
         <label>메모<textarea id="itemMemo" rows="3" maxlength="500"></textarea></label>
       </div>

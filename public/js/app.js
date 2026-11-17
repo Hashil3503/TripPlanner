@@ -340,6 +340,9 @@
     $('#emptyMsg').hidden = dm.rows.length > 0;
   }
 
+  /** 주차비는 이 장소까지 자가용으로 올 때만 합계에 들어가므로 입력 칸·표시도 그때만 보인다 (첫 장소는 들어오는 구간이 없음) */
+  const arrivesByCar = (row) => Boolean(row && !row.carry && row.leg && row.leg.mode === 'car');
+
   function buildItem(row, idx, dm) {
     const item = row.item;
     const stay = row.departure - row.arrival; // 종료 시각을 고정하면 체류 시간은 시각 차이로 정해진다
@@ -360,7 +363,7 @@
 
     const costChips = [];
     if (item.cost > 0) costChips.push(el('span', { class: 'cost-chip' }, [icon('ticket'), `입장/기타 ${won(item.cost)}${settings().people > 1 ? '/인' : ''}`]));
-    if (item.parking > 0) costChips.push(el('span', { class: 'cost-chip' }, [icon('car'), `주차 ${won(item.parking)}`]));
+    if (item.parking > 0 && arrivesByCar(row)) costChips.push(el('span', { class: 'cost-chip' }, [icon('car'), `주차 ${won(item.parking)}`]));
 
     const card = el('div', {
       class: 'item-card',
@@ -1221,7 +1224,10 @@
     showItemError('');
     syncItemTimeFields();
     $('#itemCost').value = it.cost;
-    $('#itemParking').value = it.parking;
+    $('#itemParking').value = it.parking; // 숨겨도 값은 채워 둬야 저장할 때 기존 주차비가 지워지지 않는다
+    const byCar = arrivesByCar(model.days[S.state.dayIndex].rows.find((r) => r.item === it && !r.carry));
+    $('#itemParkingField').hidden = !byCar;
+    $('#itemParkingHint').hidden = !byCar;
     $('#itemMemo').value = it.memo;
     $('#itemDay').replaceChildren(...trip().days.map((d, i) => {
       const date = F.fmtDate(F.dayDate(trip(), i));
