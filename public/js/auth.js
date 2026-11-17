@@ -50,9 +50,14 @@
   }
 
   // ---- API ----
+  // 버전 헤더: version.js가 없어도 동작하게 TP.version 접근을 막아 둔다
+  const versionOf = () => (TP.version && TP.version.current) || '';
+
   /** JSON API 호출. 상태 변경 요청에는 항상 Content-Type: application/json 을 붙인다(서버의 CSRF 방어 조건). */
   async function api(method, url, body, extra) {
     const init = Object.assign({ method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, extra || {});
+    const ver = versionOf();
+    if (ver) init.headers = Object.assign({ 'X-App-Version': ver }, init.headers);
     if (method !== 'GET') init.body = JSON.stringify(body === undefined ? {} : body);
     let res;
     try {
@@ -62,11 +67,23 @@
       err.network = true;
       throw err;
     }
+    if (TP.version && TP.version.seen) {
+      const sv = res.headers.get('X-App-Version');
+      if (sv) TP.version.seen(sv);
+    }
     let data = null;
     try {
       data = await res.json();
     } catch (e) {
       data = null;
+    }
+    if (res.status === 412 && data && data.outdated) {
+      if (TP.version && TP.version.markOutdated) TP.version.markOutdated(true);
+      const err = new Error(data.error || `요청에 실패했어요 (${res.status})`);
+      err.status = res.status;
+      err.data = data;
+      err.outdated = true;
+      throw err;
     }
     if (!res.ok) {
       const err = new Error((data && data.error) || `요청에 실패했어요 (${res.status})`);
@@ -153,6 +170,7 @@
       if (held.size) setStatus('error', CONFLICT_MSG);
       else setStatus('saved');
     } catch (e) {
+      if (e.outdated) return; // 구버전 탭: 새로고침 창만 띄우고 상태/재시도는 건드리지 않는다
       if (e.status === 401) sessionExpired();
       else setStatus('error', e.message);
     }
@@ -187,12 +205,14 @@
     const d = diff();
     const send = (method, url, body) => {
       try {
-        fetch(url, { method, credentials: 'same-origin', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
+        fetch(url, { method, credentials: 'same-origin', keepalive: true, headers: Object.assign({ 'Content-Type': 'application/json' }, vh), body: JSON.stringify(body) }).catch(() => {});
       } catch (e) {
         /* ignore */
       }
     };
     // baseRev를 함께 보내 닫히는 탭의 오래된 내용이 다른 곳의 수정을 덮어쓰지 못하게 한다
+    const ver = versionOf();
+    const vh = ver ? { 'X-App-Version': ver } : {};
     for (const [id, j] of d.puts) if (j.length < 60000) send('PUT', `/api/trips/${encodeURIComponent(id)}`, { trip: JSON.parse(j), baseRev: revs.has(id) ? revs.get(id) : null });
     for (const id of d.dels) send('DELETE', `/api/trips/${encodeURIComponent(id)}`, revs.has(id) ? { baseRev: revs.get(id) } : {});
     if (d.settings !== null) send('PUT', '/api/settings', { settings: JSON.parse(d.settings) });

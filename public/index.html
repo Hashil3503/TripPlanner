@@ -494,10 +494,27 @@
     </div>
   </dialog>
 
+  <!-- 앱이 업데이트됨 (구버전 탭): 새로고침만 허용 -->
+  <dialog id="updateDialog" aria-labelledby="updateTitle">
+    <div class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="updateTitle">플래너가 업데이트되었어요</h2>
+      </header>
+      <div class="dlg-body">
+        <p>새 버전이 배포되었어요. 계속하려면 새로고침해 주세요.</p>
+        <p id="updateLost" hidden>마지막 수정은 저장되지 않았으니 새로고침 후 다시 입력해 주세요.</p>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn primary" type="button" id="updateReload">새로고침</button>
+      </footer>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
   <script src="config.js"></script><!-- 서버가 생성: 환경변수 TP_KAKAO_JS_KEY (카카오 JavaScript 키) -->
+  <script src="js/version.js"></script>
   <script src="js/fare.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/sample.js"></script>

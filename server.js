@@ -11,10 +11,12 @@ const auth = require('./server/auth');
 const { serveStatic } = require('./server/static');
 const { createTransit } = require('./server/transit');
 const { parsePublicUrls, clientIpFrom } = require('./server/deploy');
+const { computeAppVersion } = require('./server/version');
 
 const PORT = Number(process.env.TP_PORT) || 8000; // 카카오 키에 등록한 주소가 http://localhost:8000 이므로 기본값을 유지한다
 const HOST = '127.0.0.1';
 const PUBLIC_DIR = fs.realpathSync(path.join(__dirname, 'public'));
+const APP_VERSION = computeAppVersion(PUBLIC_DIR); // public/ 파일이 바뀌면(새로 배포하면) 달라진다
 const DB_PATH = process.env.TP_DB_PATH || path.join(__dirname, 'data', 'tripplanner.db');
 
 const BODY_LIMIT = 1024 * 1024; // 1 MB
@@ -40,8 +42,8 @@ const envKey = (name) => {
   return KEY_RE.test(v) ? v : '';
 };
 const KAKAO_JS_KEY = envKey('TP_KAKAO_JS_KEY');
-// 브라우저로 나가는 설정. JS 키 외의 값을 여기에 넣지 말 것
-const CLIENT_CONFIG_JS = `window.TP_CONFIG = ${JSON.stringify({ kakaoJsKey: KAKAO_JS_KEY })};
+// 브라우저로 나가는 설정. 앱 버전 해시는 비밀이 아니므로 허용하고, JS 키 외의 다른 값은 넣지 말 것
+const CLIENT_CONFIG_JS = `window.TP_CONFIG = ${JSON.stringify({ kakaoJsKey: KAKAO_JS_KEY, appVersion: APP_VERSION })};
 `;
 
 let db;
@@ -92,7 +94,7 @@ function sendClientConfig(req, res) {
 
 function sendJson(res, status, obj, headers) {
   const body = JSON.stringify(obj);
-  res.writeHead(status, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store' }, headers || {}));
+  res.writeHead(status, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'X-App-Version': APP_VERSION }, headers || {}));
   res.end(body);
 }
 
@@ -142,6 +144,18 @@ function requireUser(req) {
   const u = currentUser(req);
   if (!u) throw new HttpError(401, '로그인이 필요해요');
   return u;
+}
+
+/** 탭이 연 구버전 앱이면 저장을 막는다. 헤더가 없는 옛 클라이언트는 통과 */
+function rejectOutdated(req, res) {
+  const v = req.headers['x-app-version'];
+  if (v === undefined || v === APP_VERSION) return false;
+  sendJson(res, 412, { error: '플래너가 업데이트되었어요. 새로고침해 주세요', outdated: true, version: APP_VERSION });
+  return true;
+}
+
+function handleVersion(req, res) {
+  sendJson(res, 200, { version: APP_VERSION });
 }
 
 function parseSettings(json) {
@@ -316,6 +330,7 @@ function sendTripConflict(res, row) {
 
 async function handlePutTrip(req, res, idSeg) {
   const u = requireUser(req);
+  if (rejectOutdated(req, res)) return;
   const id = tripIdFrom(idSeg);
   const body = await readJson(req);
   const err = validateTrip(body.trip);
@@ -336,6 +351,7 @@ async function handlePutTrip(req, res, idSeg) {
 
 async function handleDeleteTrip(req, res, idSeg) {
   const u = requireUser(req);
+  if (rejectOutdated(req, res)) return;
   const id = tripIdFrom(idSeg);
   const body = await readJson(req); // 본문이 없어도 {}
   checkBaseRev(body.baseRev);
@@ -347,6 +363,7 @@ async function handleDeleteTrip(req, res, idSeg) {
 
 async function handlePutSettings(req, res) {
   const u = requireUser(req);
+  if (rejectOutdated(req, res)) return;
   const body = await readJson(req);
   if (!isObj(body.settings)) throw new HttpError(400, '설정 데이터가 올바르지 않아요');
   const json = JSON.stringify(body.settings);
@@ -392,6 +409,7 @@ async function handleApi(req, res, pathname) {
       case 'me': allow('GET', 'DELETE'); return method === 'GET' ? handleMe(req, res) : handleDeleteAccount(req, res);
       case 'trips': allow('GET'); return handleListTrips(req, res);
       case 'settings': allow('PUT'); return handlePutSettings(req, res);
+      case 'version': allow('GET', 'HEAD'); return handleVersion(req, res);
       case 'transit': allow('GET'); return handleTransit(req, res);
       default: break;
     }
@@ -437,6 +455,7 @@ server.on('error', (e) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`여행 플래너 서버가 실행 중이에요: http://localhost:${PORT}`);
+  console.log(`앱 버전 ${APP_VERSION}`);
   if (PUBLIC_URLS.length) console.log(`서비스 주소(TP_PUBLIC_URL): ${PUBLIC_URLS.map((u) => u.origin).join(', ')}${TRUST_PROXY ? ' · 프록시 IP 신뢰' : ''}`);
   // 키 값은 출력하지 않고 설정 여부만 알린다
   console.log(`카카오 JavaScript 키(TP_KAKAO_JS_KEY): ${KAKAO_JS_KEY ? '설정됨' : '없음 - 지도를 표시할 수 없어요'}`);

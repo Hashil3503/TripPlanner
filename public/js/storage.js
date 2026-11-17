@@ -105,6 +105,7 @@
   let saveTimer = null;
   function saveNow() {
     clearTimeout(saveTimer);
+    if (TP.version && TP.version.outdated) return; // 구버전 탭: 저장하지 않는다 (새로고침 창이 떠 있다)
     try {
       localStorage.setItem(storageKey, JSON.stringify(state));
     } catch (e) {
@@ -114,7 +115,16 @@
   }
   function save() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, 250);
+    saveTimer = setTimeout(() => {
+      if (storageKey === KEY && TP.version && TP.version.check) {
+        // 게스트 데이터는 서버를 거치지 않으므로 저장 전에 버전을 확인한다 (실패/모름이면 그대로 저장)
+        TP.version.check(true).then((ok) => {
+          if (ok !== false) saveNow();
+        });
+        return;
+      }
+      saveNow();
+    }, 250);
     if (hooks.onDirty) hooks.onDirty();
   }
   window.addEventListener('beforeunload', saveNow);
