@@ -746,9 +746,9 @@ body[data-view='main'] .trip-only { display: none !important; }
 .ov-anchor { position: relative; width: 0; height: 0; cursor: default; }
 .ov-bubble {
   position: absolute; left: 0; bottom: 44px; transform: translateX(-50%);
-  min-width: 160px; max-width: 260px; padding: 12px 34px 12px 14px; border-radius: var(--radius);
+  width: 260px; max-width: calc(100vw - 32px); padding: 12px 34px 12px 14px; border-radius: var(--radius);
   background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow-lg);
-  font-size: 13px; line-height: 1.45;
+  font-size: 13px; line-height: 1.45; white-space: normal; /* 카카오 오버레이 래퍼의 nowrap 상속 차단 */
 }
 .ov-bubble::after {
   content: ''; position: absolute; left: 50%; bottom: -7px; width: 12px; height: 12px; background: var(--surface);
@@ -761,10 +761,11 @@ body[data-view='main'] .trip-only { display: none !important; }
 .ov-close:hover { background: var(--surface-2); color: var(--text); }
 .ov-close .icon { width: 14px; height: 14px; }
 .popup { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 140px; color: var(--text); }
+.ov-bubble .popup { min-width: 0; }
 .popup strong { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
 .popup-title { display: flex; align-items: center; gap: 8px; }
 .popup-num { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; flex: none; }
-.popup-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 12px; color: var(--muted); }
+.popup-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-width: 100%; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .popup-sub .icon { width: 13px; height: 13px; }
 .popup-sub .cat-ico { width: 18px; height: 18px; border-radius: 6px; }
 .popup-sub .cat-ico .icon { width: 11px; height: 11px; }
