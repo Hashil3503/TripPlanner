@@ -10,6 +10,7 @@ const { open } = require('./server/db');
 const auth = require('./server/auth');
 const { serveStatic } = require('./server/static');
 const { createTransit } = require('./server/transit');
+const { createTago } = require('./server/tago');
 const { parsePublicUrls, clientIpFrom } = require('./server/deploy');
 const { computeAppVersion } = require('./server/version');
 
@@ -54,11 +55,14 @@ try {
   process.exit(1);
 }
 const transit = createTransit({ db }); // 카카오 REST 키: 환경변수 TP_KAKAO_REST_KEY
+const tago = createTago({ db }); // TAGO 열차 서비스 키: 환경변수 TP_TAGO_KEY
 db.purgeSessions();
 transit.purge();
+tago.purge();
 setInterval(() => {
   db.purgeSessions();
   transit.purge();
+  tago.purge();
 }, 60 * 60 * 1000).unref();
 
 const loginLimiter = auth.createLimiter(10, 15 * 60 * 1000); // IP+아이디당 15분에 실패 10회
@@ -380,6 +384,14 @@ async function handleTransit(req, res) {
   sendJson(res, r.status, r.body, r.cache ? { 'X-Transit-Cache': r.cache } : undefined);
 }
 
+// ---- 열차 (TAGO 프록시; 게스트도 사용 가능) ----
+async function handleTrain(req, res, what) {
+  const q = Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
+  const r = what === 'stations' ? await tago.stations(clientIp(req)) : await tago.trips(q, clientIp(req));
+  if (r.cache) console.log(`[train] ${what} ${r.cache}`);
+  sendJson(res, r.status, r.body, r.cache ? { 'X-Train-Cache': r.cache } : undefined);
+}
+
 // ---- 라우팅 ----
 const isJsonType = (req) => String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() === 'application/json';
 
@@ -413,6 +425,9 @@ async function handleApi(req, res, pathname) {
       case 'transit': allow('GET'); return handleTransit(req, res);
       default: break;
     }
+  } else if (route.length === 2 && route[0] === 'train' && (route[1] === 'stations' || route[1] === 'trips')) {
+    allow('GET');
+    return handleTrain(req, res, route[1]);
   } else if (route.length === 2 && route[0] === 'trips') {
     allow('PUT', 'DELETE');
     return method === 'PUT' ? handlePutTrip(req, res, route[1]) : handleDeleteTrip(req, res, route[1]);
@@ -460,6 +475,7 @@ server.listen(PORT, HOST, () => {
   // 키 값은 출력하지 않고 설정 여부만 알린다
   console.log(`카카오 JavaScript 키(TP_KAKAO_JS_KEY): ${KAKAO_JS_KEY ? '설정됨' : '없음 - 지도를 표시할 수 없어요'}`);
   console.log(`카카오 REST API 키(TP_KAKAO_REST_KEY): ${transit.hasKey() ? '설정됨' : '없음 - 대중교통은 조회 실패로 표시돼요(시간은 도보/자동차 기준, 요금 미정)'}`);
+  console.log(`TAGO 열차 API 키(TP_TAGO_KEY): ${tago.hasKey() ? '설정됨' : '없음 - 열차 시간표 조회를 쓸 수 없어요(직접 입력은 가능)'}`);
   console.log('종료하려면 Ctrl+C 를 누르세요.');
 });
 

@@ -31,3 +31,16 @@ test('legCost 자가용: 직접 입력은 연료비·통행료·주차비를 모
   assert.equal(c.toll, 0);
   assert.equal(c.total, 12000);
 });
+
+test('legCost 열차·버스: 1인 요금 x 인원, 요금을 모르면 미정, 직접 입력은 1인 기준', () => {
+  const cfg = { ...fare.DEFAULT_CONFIG, people: 3 };
+  for (const mode of ['train', 'bus']) {
+    const c = fare.legCost({ mode, distanceM: 300000, fare: 30000 }, cfg);
+    assert.equal(c.total, 90000);
+    assert.equal(c.perPerson, 30000);
+    assert.equal(fare.legCost({ mode, distanceM: 300000 }, cfg).unknown, true);
+    assert.equal(fare.legCost({ mode, override: 20000 }, cfg).total, 60000);
+  }
+  assert.deepEqual(fare.MODES.map((m) => m.id), ['walk', 'bike', 'transit', 'taxi', 'car', 'train', 'bus']);
+  assert.equal(fare.DEFAULT_CONFIG.est.detour, 1.26);
+});

@@ -69,6 +69,14 @@
     return 'etc';
   }
 
+  /** 카카오 category_name -> 'train'(기차역) | 'bus'(고속·시외버스터미널) | null. 지하철역(SW8)은 기차역이 아니다 */
+  function hubOfCategory(full) {
+    const s = String(full || '');
+    if (/기차역/.test(s)) return 'train';
+    if (/버스터미널/.test(s)) return 'bus';
+    return null;
+  }
+
   function kakaoPlaceResults(data) {
     return (data || [])
       .map((d) => ({
@@ -77,6 +85,8 @@
         lat: parseFloat(d.y),
         lon: parseFloat(d.x),
         category: kakaoCategory(d),
+        hub: hubOfCategory(d.category_name),
+        distance: d.distance ? Number(d.distance) : null, // 기준점 검색일 때만 (m)
         source: 'kakao',
       }))
       .filter((r) => r.name && isFinite(r.lat) && isFinite(r.lon));
@@ -202,7 +212,23 @@
     return reverseNominatim(lat, lon, signal);
   }
 
+  /** 장소 주변(20km) 기차역/버스터미널, 가까운 순. 카카오를 쓸 수 없으면 [] */
+  async function nearbyHubs(place, kind) {
+    if (!(await loadKakao())) return [];
+    const kk = window.kakao.maps;
+    const opts = { location: new kk.LatLng(place.lat, place.lon), radius: 20000, sort: kk.services.SortBy.DISTANCE, size: 15 };
+    try {
+      const res = await kakaoCall((cb) => new kk.services.Places().keywordSearch(kind === 'train' ? '기차역' : '버스터미널', cb, opts), kakaoPlaceResults);
+      return res.filter((r) => r.hub === kind && !/폐역|폐쇄/.test(r.name)); // 폐역은 제외
+    } catch (e) {
+      console.warn(e);
+      return [];
+    }
+  }
+
   TP.geocode = {
+    hubOfCategory,
+    nearbyHubs,
     search,
     reverse,
     debounceMs,

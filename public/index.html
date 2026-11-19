@@ -305,9 +305,23 @@
       </header>
       <div class="dlg-body">
         <p class="hint" id="legDialogSub"></p>
-        <div class="grid2">
+        <div class="grid2" id="legTimeBox">
           <label>소요 시간 (시간)<input id="legHour" type="number" min="0" max="72" step="1" inputmode="numeric"></label>
           <label>(분)<input id="legMin" type="number" min="0" max="59" step="1" inputmode="numeric"></label>
+        </div>
+        <div id="legServiceBox" class="svc-box" hidden>
+          <div class="grid2">
+            <label id="legSvcTypeField">차종 (선택)<select id="legSvcType"></select></label>
+            <label id="legSvcNoField">열차 번호 (선택)<input id="legSvcNo" type="text" maxlength="20" inputmode="numeric" autocomplete="off"></label>
+            <label id="legSvcKindField">종류 (선택)<select id="legSvcKind"><option value="">선택 안 함</option><option value="express">고속</option><option value="intercity">시외</option></select></label>
+            <label id="legSvcGradeField">등급 (선택)<select id="legSvcGrade" disabled></select></label>
+          </div>
+          <div class="grid2">
+            <label>출발 시각<input id="legSvcDep" type="time"></label>
+            <label>도착 시각<input id="legSvcArr" type="time"></label>
+          </div>
+          <p class="hint">도착 시각이 출발 시각보다 이르면 다음 날 도착으로 계산해요.</p>
+          <p class="form-error" id="legError" role="alert" hidden></p>
         </div>
         <label><span id="legCostLabel">요금 (원)</span><input id="legCost" type="number" min="0" max="100000000" step="100" inputmode="numeric"></label>
         <p class="hint" id="legCostHelp"></p>
@@ -335,6 +349,44 @@
         <a id="routeKakao" class="ext-link" target="_blank" rel="noopener" hidden>카카오맵에서 보기</a>
         <button class="btn" type="button" data-close>취소</button>
         <button class="btn primary" type="submit">이 경로 선택</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 열차 편 선택 -->
+  <dialog id="trainDialog" aria-labelledby="trainDialogTitle">
+    <form id="trainForm" method="dialog" class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="trainDialogTitle">열차 편 선택</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <p class="hint" id="trainDialogSub"></p>
+        <div id="trainList" class="route-list" role="radiogroup" aria-label="열차 편"></div>
+        <p class="hint">요금은 TAGO 일반 성인 요금이라 실제와 다를 수 있어요.</p>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" id="btnTrainDefault">기본 편으로</button>
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit">이 편 선택</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 열차·버스 구간에 역/터미널 넣기 -->
+  <dialog id="hubDialog" aria-labelledby="hubDialogTitle">
+    <form id="hubForm" method="dialog" class="dialog-form">
+      <header class="dlg-head">
+        <h2 id="hubDialogTitle">역 넣기</h2>
+        <button class="icon-btn" type="button" data-close aria-label="닫기" title="닫기"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dlg-body">
+        <p class="hint" id="hubDialogSub"></p>
+        <div id="hubFields"></div>
+      </div>
+      <footer class="dlg-foot">
+        <button class="btn" type="button" data-close>취소</button>
+        <button class="btn primary" type="submit" id="hubSubmit" disabled>일정에 넣기</button>
       </footer>
     </form>
   </dialog>
@@ -521,6 +573,7 @@
   <script src="js/kakao.js"></script>
   <script src="js/geocode.js"></script>
   <script src="js/routing.js"></script>
+  <script src="js/train.js"></script>
   <script src="js/planner.js"></script>
   <script src="js/trips.js"></script>
   <script src="js/ui.js"></script>
