@@ -43,6 +43,8 @@
   --m-taxi: #e67700;
   --m-car: #e8590c;
   --m-extra: #ae3ec9;
+  --m-train: #3b5bdb;
+  --m-bus: #0b7285;
 
   /* 카테고리 */
   --cat-sight: #6741d9;
@@ -116,6 +118,8 @@
   --m-taxi: #ffa94d;
   --m-car: #ff8a5c;
   --m-extra: #da77f2;
+  --m-train: #748ffc;
+  --m-bus: #3bc9db;
 
   --cat-sight: #a68bff;
   --cat-food: #ff9a63;
@@ -653,7 +657,8 @@ body[data-view='main'] .trip-only { display: none !important; }
 .leg-actions .ext-link { padding: 0; }
 .m-walk { --mode: var(--m-walk); } .m-bike { --mode: var(--m-bike); } .m-transit { --mode: var(--m-transit); }
 .m-taxi { --mode: var(--m-taxi); } .m-car { --mode: var(--m-car); } .m-extra { --mode: var(--m-extra); }
-.icon.m-walk, .icon.m-bike, .icon.m-transit, .icon.m-taxi, .icon.m-car, .icon.m-extra { color: var(--mode); }
+.m-train { --mode: var(--m-train); } .m-bus { --mode: var(--m-bus); }
+.icon.m-walk, .icon.m-bike, .icon.m-transit, .icon.m-taxi, .icon.m-car, .icon.m-extra, .icon.m-train, .icon.m-bus { color: var(--mode); }
 .leg-edit { font-size: 12px; }
 .leg-edit .icon { width: 13px; height: 13px; }
 .leg-edit.strong { font-weight: 700; font-size: 13px; }
@@ -712,6 +717,7 @@ body[data-view='main'] .trip-only { display: none !important; }
 .bar-walk { background: var(--m-walk); } .bar-bike { background: var(--m-bike); }
 .bar-transit { background: var(--m-transit); } .bar-taxi { background: var(--m-taxi); }
 .bar-car { background: var(--m-car); } .bar-extra { background: var(--m-extra); }
+.bar-train { background: var(--m-train); } .bar-bus { background: var(--m-bus); }
 .day-rows { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
 .day-row {
   display: grid; grid-template-columns: auto 1fr auto; column-gap: 8px; align-items: center; text-align: left;
@@ -794,6 +800,11 @@ dialog::backdrop { background: var(--scrim); }
 .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .dialog-form label { min-width: 0; }
 .dialog-form label input, .dialog-form label select, .dialog-form label textarea { width: 100%; }
+.svc-box { display: grid; gap: 12px; }
+.leg-svc { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.leg-book { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.leg-book .ext-link { padding: 0; font-size: 12px; }
+.item-gap.wait.svc { color: var(--text-2); }
 .form-error { margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--danger-soft); color: var(--danger); font-size: 13px; font-weight: 500; }
 
 /* 경로 선택: 후보를 카드로 늘어놓고 하나를 고른다 (라디오는 화면에서만 숨김) */
@@ -806,6 +817,11 @@ label.route-opt {
 .route-opt:has(input:checked) { border: 2px solid var(--accent); padding: 11px; } /* 테두리가 두꺼워진 만큼 안쪽 여백을 줄여 흔들림 방지 */
 .route-opt:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .route-opt-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-variant-numeric: tabular-nums; }
+#hubFields { display: flex; flex-direction: column; gap: 20px; }
+.hub-search { height: 40px; flex: none; }
+#hubFields .route-list[hidden] { display: none; }
+#hubFields .route-list { flex: none; max-height: none; overflow: visible; } /* 목록이 눌려 잘리지 않게 하고 다이얼로그 본문이 스크롤되게 한다 */
+.hub-empty { margin: 0; font-size: 12px; color: var(--muted); }
 .auth-tabs { margin-bottom: 4px; }
 .auth-tabs > button { height: 36px; }
 

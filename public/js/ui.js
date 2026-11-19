@@ -19,15 +19,15 @@
     return svg;
   }
 
-  const MODE_ICON = { walk: 'walk', bike: 'bike', transit: 'bus', taxi: 'taxi', car: 'car' };
+  const MODE_ICON = { walk: 'walk', bike: 'bike', transit: 'bus', taxi: 'taxi', car: 'car', train: 'train', bus: 'bus' };
   const CAT_ICON = { sight: 'landmark', food: 'utensils', stay: 'bed', cafe: 'coffee', shop: 'bag', etc: 'map-pin' };
   const modeIcon = (id, cls) => icon(MODE_ICON[id] || 'bus', cls);
 
   /** 카테고리 아이콘: 색이 입혀진 작은 원형 칩 */
-  function catIcon(id) {
+  function catIcon(id, hub) {
     const n = document.createElement('span');
     n.className = 'cat-ico cat-' + (CAT_ICON[id] ? id : 'etc');
-    n.append(icon(CAT_ICON[id] || 'map-pin'));
+    n.append(icon(hub === 'train' ? 'train' : hub === 'bus' ? 'bus' : CAT_ICON[id] || 'map-pin')); // 기차역·터미널은 교통 아이콘
     return n;
   }
 

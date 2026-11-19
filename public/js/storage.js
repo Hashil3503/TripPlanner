@@ -46,6 +46,24 @@
   const validDate = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '');
   const validTime = (v) => (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : '');
 
+  /** 열차·버스 편: dep/arr(0..1439 정수)이 없으면 null. kind는 이동수단에 맞는 값만, 문자열은 20자로 자른다 */
+  function normService(raw, modeIn) {
+    if (!isObj(raw) || (modeIn !== 'train' && modeIn !== 'bus')) return null;
+    const minute = (v) => (Number.isInteger(v) && v >= 0 && v < 1440 ? v : null);
+    const dep = minute(raw.dep);
+    const arr = minute(raw.arr);
+    if (dep == null || arr == null) return null;
+    const train = modeIn === 'train';
+    return {
+      kind: train ? 'train' : raw.kind === 'express' || raw.kind === 'intercity' ? raw.kind : null,
+      type: train ? str(raw.type, null, 20) : null, // 열차 차종 (KTX 등)
+      grade: train ? null : str(raw.grade, null, 20), // 버스 등급 (우등 등)
+      no: train ? str(raw.no, null, 20) : null, // 열차 번호
+      dep,
+      arr,
+    };
+  }
+
   function normItem(raw) {
     if (!isObj(raw)) return null;
     const lat = Number(raw.lat);
@@ -61,7 +79,7 @@
       lat,
       lon,
       category: CATEGORIES.some((c) => c.id === raw.category) ? raw.category : 'etc',
-      stay: Math.round(num(raw.stay, 60, 0, 1440)),
+      stay: Math.round(num(raw.stay, 0, 0, 1440)),
       fixedStart, // 고정 시작 시각 'HH:MM' (null = 자동 연쇄)
       fixedEnd, // 고정 종료 시각 'HH:MM' (null = 체류 시간으로 계산)
       memo: typeof raw.memo === 'string' ? raw.memo.slice(0, 500) : '',
@@ -71,6 +89,8 @@
       transitIdx: Number.isInteger(raw.transitIdx) && raw.transitIdx >= 0 && raw.transitIdx < 5 ? raw.transitIdx : null, // 대중교통 대안 경로 번호 (null = 가장 빠른 경로)
       legMin: Number.isInteger(raw.legMin) && raw.legMin >= 0 && raw.legMin <= 4320 ? raw.legMin : null, // 이전 장소에서 오는 이동 시간 직접 입력(분, null = 자동)
       legCost: Number.isInteger(raw.legCost) && raw.legCost >= 0 && raw.legCost <= 1e8 ? raw.legCost : null, // 이동 요금 직접 입력(원, 대중교통·도보·자전거는 1인, 택시·자가용은 차량 1대 총액, null = 자동)
+      legService: normService(raw.legService, modes.includes(raw.modeIn) ? raw.modeIn : null), // 열차·버스 편 (null = 없음)
+      hub: raw.hub === 'train' || raw.hub === 'bus' ? raw.hub : null, // 기차역/버스터미널 표시 (null = 일반 장소)
     };
   }
 
@@ -237,7 +257,7 @@
 
   /** 게스트 데이터에서 아직 손대지 않은 샘플 여행인지 (이름 제외 내용 비교, 날짜/ID 무시) */
   function tripSig(t) {
-    return JSON.stringify([t.name, t.days.map((d) => [d.startTime, d.items.map((i) => [i.name, i.lat, i.lon, i.category, i.stay, i.fixedStart || null, i.fixedEnd || null, i.memo, i.cost, i.parking, i.modeIn])])]);
+    return JSON.stringify([t.name, t.days.map((d) => [d.startTime, d.items.map((i) => [i.name, i.lat, i.lon, i.category, i.stay, i.fixedStart || null, i.fixedEnd || null, i.memo, i.cost, i.parking, i.modeIn, i.legService || null, i.hub || null])])]);
   }
   const isSample = (t) => tripSig(t) === tripSig(TP.sample.create());
 
@@ -301,7 +321,7 @@
     return { id: uid(), name, startDate: startDate || '', days };
   }
   const newItem = (p) => Object.assign(
-    { id: uid(), name: '새 장소', lat: 0, lon: 0, category: 'sight', stay: 60, fixedStart: null, fixedEnd: null, memo: '', cost: 0, parking: 0, modeIn: null, transitIdx: null, legMin: null, legCost: null },
+    { id: uid(), name: '새 장소', lat: 0, lon: 0, category: 'sight', stay: 0, fixedStart: null, fixedEnd: null, memo: '', cost: 0, parking: 0, modeIn: null, transitIdx: null, legMin: null, legCost: null, legService: null, hub: null },
     p
   );
 

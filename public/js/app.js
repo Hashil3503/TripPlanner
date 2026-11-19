@@ -349,6 +349,8 @@
     const pin = (fixed) => (fixed ? [icon('lock', 'fixed-ico')] : []);
     const timeParts = row.carry
       ? [`~ ${F.fmtTime(row.departure)} · 전날부터 이어서 체류`]
+      : row.anchor // 열차·버스 출발 시각에 묶인 역·터미널: 머무는 시간은 아래 '대기'로 보여준다
+      ? [F.fmtTime(row.arrival), ' – ', el('span', { class: 'fixed' }, [...pin(true), F.fmtTime(row.departure)]), ` · ${row.anchor.mode === 'train' ? '열차' : '버스'} 출발`]
       : stay > 0
       ? [el('span', { class: item.fixedStart ? 'fixed' : '' }, [...pin(item.fixedStart), F.fmtTime(row.arrival)]), ' – ',
         el('span', { class: item.fixedEnd ? 'fixed' : '' }, [...pin(item.fixedEnd), F.fmtTime(row.departure)]), ` · ${stay}분 체류`]
@@ -360,6 +362,16 @@
         : row.lateMin > 0
           ? el('div', { class: 'item-gap late' }, [icon('alert'), `${row.lateMin}분 늦음 (도착 예정 ${F.fmtTime(row.est)})`])
           : null;
+
+    // 다음 구간이 편이 정해진 열차·버스면 그 출발 시각까지의 대기 / 놓침
+    const svcName = row.anchor ? (row.anchor.mode === 'train' ? '열차' : '버스') : '';
+    const svcNote = row.svcMissMin > 0
+      ? el('div', { class: 'item-gap late' }, [icon('alert'), `${svcName}를 놓쳐요 (${row.svcMissMin}분 늦음)`])
+      : row.svcTight
+        ? el('div', { class: 'item-gap late' }, [icon('alert'), row.svcWaitMin > 0 ? `${svcName} 출발까지 ${row.svcWaitMin}분뿐이에요. 앞 일정을 당기거나 다음 ${svcName}를 타는 걸 추천해요` : `${svcName}가 도착하자마자 출발해요. 앞 일정을 당기거나 다음 ${svcName}를 타는 걸 추천해요`])
+      : row.svcWaitMin > 0
+        ? el('div', { class: 'item-gap wait svc' }, [icon('clock'), `대기 ${F.fmtDuration(row.svcWaitMin)}`])
+        : null;
 
     const costChips = [];
     if (item.cost > 0) costChips.push(el('span', { class: 'cost-chip' }, [icon('ticket'), `입장/기타 ${won(item.cost)}${settings().people > 1 ? '/인' : ''}`]));
@@ -378,12 +390,13 @@
     }, [
       buildNode(idx),
       el('div', { class: 'item-body' }, [
-        el('div', { class: 'item-title' }, [UI.catIcon(item.category), el('span', { class: 'name', text: item.name })]),
+        el('div', { class: 'item-title' }, [UI.catIcon(item.category, P.hubOf(item)), el('span', { class: 'name', text: item.name })]),
         el('div', { class: 'item-times' + (row.late ? ' late' : '') }, [
           icon(row.late ? 'alert' : 'clock'),
           el('span', { class: 'times-text' }, timeParts),
         ]),
         gapNote,
+        svcNote,
         item.memo ? el('div', { class: 'item-memo', text: item.memo }) : null,
         costChips.length ? el('div', { class: 'item-costs' }, costChips) : null,
       ]),
@@ -502,9 +515,32 @@
   }
 
   /** 장소 사이의 이동 구간: 타임라인 위의 가벼운 연결 행. 접으면 한 줄(이동수단·시간·비용)만 남는다. */
-  const FALLBACK_HINT = '시간은 거리 2km 이하면 도보, 넘으면 자동차 기준으로 계산했고, 요금은 직접 입력해 주세요';
-  const NOROUTE_HINT = '카카오가 대중교통 경로를 찾지 못했어요. ' + FALLBACK_HINT;
-  const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요';
+  const FALLBACK_HINT = '시간은 자동차 기준으로 계산했고, 요금은 직접 입력해 주세요';
+  const nearWalkHint = (leg) => `거리가 가까워요(직선 ${(TP.routing.haversine(leg.from, leg.to) / 1000).toFixed(1)}km). 이동수단을 도보로 바꾸면 더 정확할 수 있어요`;
+  const NOROUTE_HINT = '카카오가 대중교통 경로를 찾지 못했어요. ' + FALLBACK_HINT + '. 열차나 버스를 선택하면 경로를 조회할 수 있어요';
+  const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요. 출발지와 도착지가 멀면 이동수단을 열차·버스로 바꿔 조회하거나, 경유지를 추가해 경로를 나눠 보세요';
+  const NOSERVICE_HINT = '편(출발·도착 시각)을 입력하면 그 시간으로 계산해요. 출발·도착 시각을 입력해 주세요. 입력하기 전에는 시간과 요금을 계산하지 않아요';
+  const HUB_NOFARE_HINT = '요금을 알면 직접 입력해 주세요 (일반 성인 1인 요금 기준). 입력하지 않으면 합계에서 빼요';
+  const KIND_LABEL = { express: '고속', intercity: '시외' };
+  /** 열차·버스 편 한 줄: '차종 번호 · 출발 → 도착' / '고속 우등 · 출발 → 도착' (빈 부분은 생략) */
+  function serviceLine(leg) {
+    const s = leg.service;
+    if (!s) return '';
+    const name = leg.mode === 'train' ? [s.type, s.no] : [KIND_LABEL[s.kind], s.grade];
+    const time = `${F.fmtTime(s.dep)} → ${F.fmtTime(s.arr < s.dep ? s.arr + 1440 : s.arr)}`;
+    const head = name.filter(Boolean).join(' ');
+    return head ? `${head} · ${time}` : time;
+  }
+  const BOOKING = {
+    train: [['코레일 예매', 'https://www.korail.com/ticket/search/general']],
+    express: [['고속버스 예매', 'https://www.kobus.co.kr']],
+    intercity: [['시외버스 예매', 'https://txbus.t-money.co.kr']],
+  };
+  function bookingLinks(leg) {
+    const kind = leg.mode === 'train' ? 'train' : leg.service && leg.service.kind;
+    const list = BOOKING[kind] || [...BOOKING.express, ...BOOKING.intercity];
+    return el('div', { class: 'leg-book' }, list.map(([text, href]) => el('a', { class: 'ext-link', href, target: '_blank', rel: 'noopener' }, [text, icon('external')])));
+  }
 
   /** 이동수단 선택: 고른 수단으로 바꾸고, '자동 선택'은 거리 기준으로 되돌린다 */
   function modeSelect(leg, item, cls) {
@@ -582,6 +618,24 @@
     return toMin(Math.max(0, route.totalTime - ride));
   }
 
+  /** 열차 조회가 못 알려 준 이유 안내 (조회 결과가 없으면 빈 문자열) */
+  function lookupMsg(lk) {
+    if (!lk || lk.state !== 'none') return '';
+    const d = TP.train.lastLookupDate();
+    switch (lk.reason) {
+      case 'period': return `열차 시간표는 약 4주 뒤(${d.getMonth() + 1}월 ${d.getDate()}일)까지만 조회돼요. 편을 직접 입력해 주세요`;
+      case 'station': return `'${lk.place}'을(를) 열차 역 목록에서 찾지 못했어요. 역 이름을 확인하거나 편을 직접 입력해 주세요`;
+      case 'noresult': return '이 날 두 역 사이 열차가 조회되지 않아요. 편을 직접 입력해 주세요';
+      case 'none-left': return '이후 출발하는 열차가 없어요. 다른 편을 고르거나 직접 입력해 주세요';
+      case 'error': return `열차 조회 실패: ${lk.message}. 편을 직접 입력해 주세요`;
+      default: return '';
+    }
+  }
+  const lookupLimitText = () => {
+    const d = TP.train.lastLookupDate();
+    return `약 4주 뒤(${d.getMonth() + 1}월 ${d.getDate()}일)`;
+  };
+
   const MARK_CLS = { 추정: 'k-est', 직접: 'k-manual', 미정: 'k-unknown', 할증: 'k-surcharge' };
 
   function buildLeg(leg, item, color, idx) {
@@ -602,16 +656,28 @@
     // 시간·요금을 모두 직접 입력했으면 화면의 값은 추정이 아니므로 태그·표시 모두 붙이지 않는다
     if (leg.transit && !leg.loading && leg.fallbackReason && !(leg.override.min && leg.override.cost)) {
       const t = leg.noRoute ? '경로 없음' : '조회 실패';
-      tag('warn', t, leg.noRoute ? NOROUTE_HINT : `${leg.fallbackReason} ${FALLBACK_HINT}`);
+      tag('warn', t, (leg.noRoute ? NOROUTE_HINT : `${leg.fallbackReason} ${FALLBACK_HINT}`) + (leg.nearWalk ? '. ' + nearWalkHint(leg) : ''));
       notes.push(t);
       mark('미정', t);
-      const BY_TEXT = leg.fallbackBy === 'walk' ? '시간은 도보 기준' : '시간은 자동차 기준';
       notes.push(t);
       if (!leg.override.cost) mark('미정', t);
-      if (!leg.override.min) mark('추정', BY_TEXT);
+      if (!leg.override.min) mark('추정', '시간은 자동차 기준');
     }
-    if (leg.cost.unknown && !leg.transit && !leg.loading) {
-      tag('warn', '요금 미정', NOFARE_HINT);
+    const lkMsg = leg.noService && !leg.loading ? lookupMsg(leg.lookup) : '';
+    if (leg.noService && !leg.loading) {
+      tag('warn', '편 미정', NOSERVICE_HINT + (lkMsg ? '. ' + lkMsg : ''));
+      notes.push('편 미정');
+      mark('미정', '편 미정');
+      if (!leg.override.cost) mark('미정', '요금 미정');
+    }
+    if (leg.serviceDefault && !leg.loading) tag('accent', '기본 편', '조회한 열차 중 역에 도착해 체류한 뒤 가장 먼저 탈 수 있는 편이에요');
+    if (leg.svcNotListed && !leg.loading) {
+      tag('warn', '시간표에 없는 편', '조회한 시간표에 이 편이 없어요. 편을 다시 고르거나 직접 입력한 값을 확인해 주세요');
+      notes.push('시간표에 없는 편');
+    }
+    if (leg.apiFare && !leg.loading) tag('', '일반 성인 기준', 'TAGO 일반 성인 요금이에요. 실제 요금과 다를 수 있어요');
+    if (leg.cost.unknown && !leg.transit && !leg.loading && !leg.noService) {
+      tag('warn', '요금 미정', P.isHubMode(leg.mode) ? HUB_NOFARE_HINT : NOFARE_HINT);
       notes.push('요금 미정');
       mark('미정', '요금 미정');
     }
@@ -632,6 +698,10 @@
       notes.push(t);
       mark('할증', t);
     }
+    // 택시·자가용 요금은 추정이다 (요금을 직접 입력했으면 제외)
+    if ((leg.mode === 'taxi' || leg.mode === 'car') && !leg.loading && !leg.override.cost) {
+      mark('추정', leg.mode === 'taxi' ? '서울 중형택시 기준 추정 요금이라 실제와 다를 수 있어요' : '연료비·통행료는 추정이라 실제와 다를 수 있어요');
+    }
 
     const details = [];
     if (leg.override.cost) {
@@ -640,23 +710,29 @@
       details.push(`연료비 ${won(leg.cost.fuel)}` + (leg.cost.toll ? ` + 통행료 약 ${won(leg.cost.toll)}` : '') + (leg.cost.parking ? ` + 주차 ${won(leg.cost.parking)}` : '') + (leg.estimated && !leg.loading ? ' · 통행료 미포함(경로 조회 실패)' : ''));
     } else if (leg.mode === 'taxi' && settings().people > 1) {
       details.push('택시 요금은 인원이 나눠 낸다고 가정');
+    } else if (leg.noService) {
+      details.push(lkMsg || '출발·도착 시각을 입력하면 시간이 계산돼요');
     } else if (leg.transit && leg.fallbackReason) {
-      details.push(leg.fallbackBy === 'walk' ? '시간은 도보 기준이에요' : '시간은 자동차 기준이에요');
+      details.push('시간은 자동차 기준이에요' + (leg.nearWalk ? '. ' + nearWalkHint(leg) : ''));
     }
 
     const bodyId = 'leg-body-' + item.id;
     const modeLabel = (MODES.find((m) => m.id === leg.mode) || {}).label || '';
-    const summaryText = `${F.fmtDuration(leg.durationMin)} · ${legCostShort(leg)}`;
+    const durText = leg.noService ? '시간 미정' : F.fmtDuration(leg.durationMin);
+    const summaryText = `${durText} · ${legCostShort(leg)}`;
     const warnText = notes.join(', ');
     const tr = leg.transitReal;
     const people = Math.max(1, Math.round(settings().people || 1));
     const noCost = leg.mode === 'walk' || leg.mode === 'bike';
     const fr = tr && tr.fareRange;
+    const hub = P.isHubMode(leg.mode);
+    const distText = (hub ? '약 ' : '') + F.fmtDist(leg.distance); // 열차·버스 거리는 직선거리 추정
+    const svcText = serviceLine(leg);
 
     // 접힌 행: (이동수단·시간·비용) + (노선/거리·태그·바로가기) 두 줄
     const sumSub = [];
     if (tr) sumSub.push(UI.routePills(tr.route));
-    else sumSub.push(el('span', { class: 'leg-sum-dist', text: F.fmtDist(leg.distance) }), ...buildTags().filter((n) => !n.classList.contains('loading')));
+    else sumSub.push(svcText ? el('span', { class: 'leg-svc', text: svcText }) : null, el('span', { class: 'leg-sum-dist', text: distText }), ...buildTags().filter((n) => !n.classList.contains('loading')));
     sumSub.push(el('span', { class: 'grow' }));
     if (tr) {
       sumSub.push(el('button', {
@@ -665,7 +741,7 @@
       }));
     } else {
       sumSub.push(el('button', {
-        type: 'button', class: 'link', text: leg.override.min || leg.override.cost ? '직접 입력 수정' : '직접 입력',
+        type: 'button', class: 'link', text: hub ? (leg.service || leg.override.cost ? '편·요금 수정' : '편·요금 입력') : leg.override.min || leg.override.cost ? '직접 입력 수정' : '직접 입력',
         onclick: () => openLegDialog(item.id),
       }));
     }
@@ -676,28 +752,32 @@
     else if (people > 1 && !leg.cost.unknown && !noCost) subLine.push(`1인 ${won(leg.cost.perPerson)}`);
     const footTags = buildTags();
     if (tr) footTags.push(el('span', { class: 'tag', text: tr.route.transfers > 0 ? `환승 ${tr.route.transfers}회` : '환승 없음' }));
-    const foot = footTags.length > 0 || (tr && tr.routes.length > 1);
+    const trainPick = leg.mode === 'train' && !leg.loading && leg.trips && leg.trips.length > 0;
+    const foot = footTags.length > 0 || (tr && tr.routes.length > 1) || trainPick;
     const cardKids = [
       el('div', { class: 'leg-card-head' }, [
         el('div', {}, [
-          el('span', { class: 'muted-s', text: `${modeLabel} · ${F.fmtDist(leg.distance)}` }),
-          el('strong', { class: 'leg-card-dur', text: F.fmtDuration(leg.durationMin) }),
+          el('span', { class: 'muted-s', text: `${modeLabel} · ${distText}` }),
+          el('strong', { class: 'leg-card-dur', text: durText }),
         ]),
         el('div', { class: 'leg-card-cost-col' }, [
           el('strong', { class: 'leg-card-cost', text: leg.loading ? (noCost ? '0원' : '—') : leg.cost.unknown ? '요금 미정' : noCost ? '0원' : won(leg.cost.total) }),
           subLine.length ? el('span', { class: 'muted-s', text: subLine.join(' · ') }) : null,
         ]),
       ]),
+      svcText ? el('div', { class: 'leg-card-sec leg-svc', text: svcText }) : null,
       tr ? el('div', { class: 'leg-card-sec' }, buildSteps(tr.route, leg.from, leg.to)) : details.length ? el('div', { class: 'leg-card-sec leg-detail', text: details.join(' · ') }) : null,
       tr && details.length ? el('div', { class: 'leg-card-sec leg-detail', text: details.join(' · ') }) : null,
+      hub ? el('div', { class: 'leg-card-sec' }, bookingLinks(leg)) : null,
       foot ? el('div', { class: 'leg-card-foot' }, [
         ...footTags,
         el('span', { class: 'grow' }),
         tr && tr.routes.length > 1 ? el('button', { type: 'button', class: 'link', text: `경로 ${tr.routes.length}개 중 선택`, onclick: () => openRouteDialog(item.id) }) : null,
+        trainPick ? el('button', { type: 'button', class: 'link', text: `편 ${leg.trips.length}개 중 선택`, onclick: () => openTrainDialog(item.id) }) : null,
       ]) : null,
     ];
 
-    const editText = leg.override.min || leg.override.cost ? '직접 입력 수정' : leg.cost.unknown ? '직접 입력' : '시간·요금 직접 입력';
+    const editText = hub ? (leg.service || leg.override.cost ? '편·요금 수정' : '편·요금 입력') : leg.override.min || leg.override.cost ? '직접 입력 수정' : leg.cost.unknown ? '직접 입력' : '시간·요금 직접 입력';
 
     // 구간 영역 전체가 토글: 선 버튼(키보드 포함)이나 빈 곳을 누르면 접고 편다. 안쪽의 다른 컨트롤과 텍스트 선택은 제외
     const legEl = el('div', {
@@ -727,7 +807,7 @@
         el('div', { class: 'leg-summary' }, [
           el('div', { class: 'leg-sum-top' }, [
             modeSelect(leg, item, 'pill'),
-            el('strong', { class: 'leg-sum-dur', text: F.fmtDuration(leg.durationMin) }),
+            el('strong', { class: 'leg-sum-dur', text: durText }),
             el('span', { class: 'grow' }),
             el('strong', { class: 'leg-sum-cost', text: legCostShort(leg) }),
             fr && !leg.override.cost ? el('span', { class: 'leg-sum-range', title: '요금 범위', text: '범위' }) : null,
@@ -767,6 +847,8 @@
     { id: 'transit', label: '대중교통', ico: 'bus' },
     { id: 'taxi', label: '택시', ico: 'taxi' },
     { id: 'car', label: '자가용(연료·주차)', ico: 'car' },
+    { id: 'train', label: '열차', ico: 'train' },
+    { id: 'bus', label: '버스(고속·시외)', ico: 'bus' },
     { id: 'extra', label: '입장·기타', ico: 'ticket' },
   ];
 
@@ -838,7 +920,7 @@
       el('h4', { text: '일차별 합계' }),
       el('div', { class: 'day-rows' }, dayRows),
       ...(t.unknownCostLegs ? [el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(t.unknownCostLegs)} (이동 구간의 직접 입력으로 채울 수 있어요)`])] : []),
-      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)입니다. 경로를 찾지 못한 구간은 시간을 도보(2km 이하) 또는 자동차 기준으로 계산하고 요금은 미정으로 두어 합계에서 제외해요. 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 서울 중형택시 기준 추정치이고 통행료(고속도로)는 포함되지 않습니다. 자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다.' })
+      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)입니다. 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 두어 합계에서 제외해요. 두 장소가 가까우면(직선 2km 이하) 도보로 바꿔 보라고 안내해요. 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 서울 중형택시 기준 추정치이고 통행료(고속도로)는 포함되지 않습니다. 자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다. 열차·버스(고속·시외)는 편을 직접 입력하거나 조회한 편 기준이고, 요금은 일반 성인 기준이라 실제와 다를 수 있습니다. 편을 입력하지 않으면 시간은 계산하지 않고(시간 미정) 요금은 미정으로 두어 합계에서 제외해요. ' + `열차 시간표·요금은 ${lookupLimitText()}까지만 조회돼요.` })
     );
   }
 
@@ -888,6 +970,20 @@
       for (const r of dm.rows) {
         const leg = r.leg;
         if (!leg || !leg.loading) continue;
+        if (leg.mode === 'train') {
+          // 열차: 역 목록 -> 구간 시간표 조회 (경로 조회와 키가 겹치지 않는다)
+          const dd = F.dayDate(trip(), dm.dayIndex);
+          if (!dd || !TP.train) continue;
+          const ymd = TP.train.ymdOf(dd);
+          const tk = TP.train.key(leg.from, leg.to, ymd);
+          if (inflight.has(tk)) continue;
+          inflight.add(tk);
+          TP.train.get(leg.from, leg.to, ymd).then(() => {
+            inflight.delete(tk);
+            scheduleRender();
+          });
+          continue;
+        }
         const k = TP.routing.key(leg.from, leg.to, leg.profile);
         if (inflight.has(k)) continue;
         inflight.add(k);
@@ -941,7 +1037,17 @@
     if (redraw) renderMap(false); // 지도 경로의 네온 강조도 함께 갱신
   }
 
-  function setMode(itemId, mode) {
+  async function setMode(itemId, mode) {
+    if (mode === 'train' || mode === 'bus') {
+      if (mode === 'train') await TP.train.load(); // 역 목록이 있어야 장소가 역인지 알 수 있다
+      const items = day().items;
+      const idx = items.findIndex((x) => x.id === itemId);
+      // 하루의 첫 장소는 앞 장소(전날 숙소)를 고칠 수 없어 묻지 않는다
+      if (idx > 0) {
+        const need = P.hubMissing(items[idx - 1], items[idx], mode);
+        if (need.dep || need.arr) return openHubDialog(itemId, mode, need);
+      }
+    }
     const it = day().items.find((x) => x.id === itemId);
     if (!it) return;
     it.modeIn = mode;
@@ -955,6 +1061,7 @@
     if (it) {
       it.legMin = null;
       it.legCost = null;
+      it.legService = null; // 열차·버스 편도 이동수단·순서가 바뀌면 의미가 없어진다
     }
   }
 
@@ -974,7 +1081,7 @@
       return;
     }
     const d = day();
-    const it = S.newItem({ name: String(p.name || '새 장소').slice(0, 100), lat: p.lat, lon: p.lon, category: p.category && p.category !== 'etc' ? p.category : 'sight' });
+    const it = S.newItem({ name: String(p.name || '새 장소').slice(0, 100), lat: p.lat, lon: p.lon, category: p.category && p.category !== 'etc' ? p.category : 'sight', hub: p.hub || null }); // 체류는 기본 0분(newItem)
     d.items.push(it);
     selectedId = it.id;
     S.save();
@@ -1068,7 +1175,7 @@
         ]),
         ...results.map((r) =>
           el('li', { class: 'result' }, [
-            UI.catIcon(r.category),
+            UI.catIcon(r.category, r.hub),
             el('button', { type: 'button', class: 'result-main', title: '지도에서 보기', onclick: () => TP.map.showPlace(r, true) }, [
               el('span', { class: 'result-head' }, [
                 el('span', { class: 'result-name', text: r.name }),
@@ -1221,6 +1328,14 @@
     const first = day().items[0] === it && !model.days[S.state.dayIndex].rows[0].carry; // 전날 체류가 이어지면 하루 시작은 그 종료 시각
     const hint = '시작·종료·체류 중 두 개를 정하면 나머지는 자동으로 계산해요. 정한 시작보다 일찍 도착하면 그 시각까지 기다려요.';
     $('#itemTimeHint').textContent = first && !it.fixedStart && !it.fixedEnd ? `시각을 비우면 ${day().startTime}(자동)에 시작해요. ${hint}` : hint;
+    // 다음 구간이 편이 정해진 열차·버스면 종료 시각은 그 출발 시각을 따른다 (저장된 fixedEnd는 그대로 두고 무시)
+    const anchor = (model.days[S.state.dayIndex].rows.find((r) => r.item === it && !r.carry) || {}).anchor;
+    $('#itemFixedEnd').disabled = !!anchor;
+    if (anchor) {
+      const at = F.fmtTime(anchor.dep);
+      $('#itemFixedEnd').value = at;
+      $('#itemTimeHint').textContent = anchor.mode === 'train' ? `열차 출발 시각(${at})을 따라요. 체류 시간은 기본 편을 고를 때 역에서 필요한 최소 시간으로 써요` : `버스 출발 시각(${at})을 따라요`;
+    }
     showItemError('');
     syncItemTimeFields();
     $('#itemCost').value = it.cost;
@@ -1248,11 +1363,11 @@
     const stay = $('#itemStay');
     const fs = $('#itemFixedStart').value;
     const fe = $('#itemFixedEnd').value;
-    const both = !!(fs && fe);
+    const both = !!(fs && fe) && !$('#itemFixedEnd').disabled;
     if (both && !stay.disabled) stay.dataset.saved = stay.value; // 시각을 지우면 원래 체류 시간으로 되돌린다
     if (!both && stay.disabled && stay.dataset.saved != null) stay.value = stay.dataset.saved;
     if (both && fe > fs) stay.value = F.parseTime(fe) - F.parseTime(fs);
-    stay.disabled = both;
+    stay.disabled = both; // 열차·버스 출발 시각에 묶여도 체류는 열려 있다(열차 기본 편을 고를 때 최소 체류로 쓴다)
     stay.title = both ? '시작·종료 시각을 정해서 체류 시간은 그 차이로 계산돼요' : '';
     showItemError('');
   }
@@ -1261,8 +1376,9 @@
     const it = day().items.find((x) => x.id === editingItemId);
     if (!it) return $('#itemDialog').close();
     const fs = $('#itemFixedStart').value || null;
-    const fe = $('#itemFixedEnd').value || null;
-    if (fs && fe && fe <= fs) return showItemError('종료 시각은 시작 시각보다 늦어야 해요.');
+    const feLocked = $('#itemFixedEnd').disabled; // 열차·버스 출발 시각을 따르는 중이면 입력값 대신 저장된 값을 보존
+    const fe = feLocked ? it.fixedEnd : $('#itemFixedEnd').value || null;
+    if (!feLocked && fs && fe && fe <= fs) return showItemError('종료 시각은 시작 시각보다 늦어야 해요.');
     const nn = (id, def, min, max) => {
       const v = Number($(id).value);
       return isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
@@ -1271,7 +1387,7 @@
     it.lat = nn('#itemLat', it.lat, -90, 90);
     it.lon = nn('#itemLon', it.lon, -180, 180);
     it.category = $('#itemCat').value;
-    if (!(fs && fe)) it.stay = Math.round(nn('#itemStay', 60, 0, 1440)); // 둘 다 정하면 체류는 시각 차이로 계산되므로 기존 값을 보존
+    if (!(fs && fe && !feLocked)) it.stay = Math.round(nn('#itemStay', 0, 0, 1440)); // 둘 다 정하면 체류는 시각 차이로 계산되므로 기존 값을 보존
     it.fixedStart = fs;
     it.fixedEnd = fe;
     it.cost = Math.round(nn('#itemCost', 0, 0, 1e9));
@@ -1300,7 +1416,25 @@
     bike: ['요금 (1인, 원)', '인원 수만큼 곱해서 합계에 반영해요.'],
     taxi: ['택시 요금 (차량 1대 총액, 원)', '인원이 나눠 낸다고 보고 총액 그대로 합계에 반영해요.'],
     car: ['자가용 비용 (차량 1대 총액, 원)', '연료비·통행료·주차비를 대신하는 총액이에요.'],
+    train: ['요금 (1인, 원)', '일반 성인 기준 1인 요금이에요. 인원 수만큼 곱해서 합계에 반영하고, 비우면 요금 미정으로 두어 합계에서 빼요.'],
+    bus: ['요금 (1인, 원)', '일반 성인 기준 1인 요금이에요. 인원 수만큼 곱해서 합계에 반영하고, 비우면 요금 미정으로 두어 합계에서 빼요.'],
   };
+  // 열차 차종: 공공데이터포털 TAGO 열차정보 GetVhcleKndList 응답(2026-11)
+  const TRAIN_TYPES = ['KTX', 'KTX-산천', 'KTX-산천(A-type)', 'KTX-산천(B-type)', 'KTX-이음', 'KTX-청룡', 'SRT', 'ITX-새마을', 'ITX-청춘', 'ITX-마음', '새마을호', '무궁화호', '누리로', '통근열차', 'AREX직통'];
+  let editingLegMode = null;
+
+  /** 선택 목록: '선택 안 함' + 목록 + (저장된 값이 목록에 없으면 그 값) */
+  function fillOptions(sel, list, cur) {
+    const all = cur && !list.includes(cur) ? [...list, cur] : list;
+    sel.replaceChildren(el('option', { value: '', text: '선택 안 함' }), ...all.map((v) => el('option', { value: v, text: v })));
+    sel.value = cur || '';
+  }
+  const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  function showLegError(msg) {
+    const p = $('#legError');
+    p.textContent = msg;
+    p.hidden = !msg;
+  }
 
   function openLegDialog(itemId) {
     // 출발 장소는 계산된 행에서 가져온다 (첫 장소의 출발지가 전날에서 이어진 체류일 수 있다)
@@ -1320,6 +1454,27 @@
     $('#legCostLabel').textContent = label;
     $('#legCostHelp').textContent = help;
     $('#legCost').value = it.legCost == null ? '' : it.legCost;
+    // 열차·버스: 소요 시간 대신 편(차종·번호·출발·도착)을 입력한다
+    const hub = P.isHubMode(leg.mode);
+    editingLegMode = leg.mode;
+    $('#legTimeBox').hidden = hub;
+    $('#legServiceBox').hidden = !hub;
+    $('#legDialogTitle').textContent = hub ? `${leg.mode === 'train' ? '열차' : '버스'} 편·요금 입력` : '이동 시간·요금 직접 입력';
+    showLegError('');
+    if (hub) {
+      const s = P.validService(it.legService);
+      const train = leg.mode === 'train';
+      for (const id of ['#legSvcTypeField', '#legSvcNoField']) $(id).hidden = !train;
+      for (const id of ['#legSvcKindField', '#legSvcGradeField']) $(id).hidden = train;
+      fillOptions($('#legSvcType'), TRAIN_TYPES, s && s.type);
+      const kind0 = (s && s.kind !== 'train' && s.kind) || '';
+      fillOptions($('#legSvcGrade'), P.busGrades(kind0), kind0 ? s.grade : null);
+      $('#legSvcGrade').disabled = !kind0;
+      $('#legSvcNo').value = (s && s.no) || '';
+      $('#legSvcKind').value = kind0;
+      $('#legSvcDep').value = s ? hhmm(s.dep) : '';
+      $('#legSvcArr').value = s ? hhmm(s.arr) : '';
+    }
     $('#legDialog').showModal();
   }
 
@@ -1360,6 +1515,220 @@
     $('#routeDialog').showModal();
   }
 
+  // ---- 역·터미널 넣기 (열차·버스로 바꿀 때 출발/도착이 역이 아니면) ----
+  let hubState = null; // { itemId, mode, sides: { dep|arr: { recs, found, pick, timer, seq } }, done }
+
+  const HUB_REC_MAX = 5; // 역·터미널 추천 목록에 보여 줄 최대 개수 (열차 수 거르기를 마친 뒤 가까운 순)
+  const hubWord = (mode) => (mode === 'train' ? '역' : '터미널');
+  const distText = (m) => (m == null ? '' : m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(1)}km`);
+
+  function openHubDialog(itemId, mode, need) {
+    const items = day().items;
+    const idx = items.findIndex((x) => x.id === itemId);
+    const from = items[idx - 1];
+    const to = items[idx];
+    const w = hubWord(mode);
+    const mw = mode === 'train' ? '열차' : '버스';
+    hubState = { itemId, mode, done: false, sides: {} };
+    const dd = F.dayDate(trip(), S.state.dayIndex);
+    const ymd = dd ? TP.train.ymdOf(dd) : null;
+    const inWin = Boolean(ymd) && TP.train.inWindow(ymd);
+    const fixed = [!need.dep && `출발${w} ${from.name}`, !need.arr && `도착${w} ${to.name}`].filter(Boolean).join(', ');
+    $('#hubDialogTitle').textContent = `${mw} 이용 ${w} 정하기`;
+    $('#hubDialogSub').textContent = `${from.name} → ${to.name} 구간을 ${mw}로 가려면 ${w}이 일정에 있어야 해요.${fixed ? ` (${fixed}: 그대로 써요)` : ''}`;
+    $('#hubFields').replaceChildren(
+      ...['dep', 'arr'].filter((s) => need[s]).map((s) => {
+        const place = s === 'dep' ? from : to;
+        const label = `${s === 'dep' ? '출발' : '도착'}${w}`;
+        const side = (hubState.sides[s] = { recs: null, found: [], pick: null, timer: 0, seq: 0, status: 'loading', recSeq: 0, refresh: null });
+        const box = el('fieldset', { id: `hubSide-${s}` }, [
+          el('legend', { text: `${label} (${place.name} 근처)` }),
+          el('input', { class: 'hub-search', type: 'search', placeholder: `${w} 이름으로 검색`, autocomplete: 'off', 'aria-label': `${label} 검색` }),
+          el('div', { class: 'route-list', role: 'radiogroup', 'aria-label': label }),
+          el('div', { class: 'route-list', role: 'radiogroup', 'aria-label': `${label} 검색 결과` }),
+        ]);
+        box.querySelector('.hub-search').addEventListener('input', (e) => {
+          clearTimeout(side.timer);
+          const q = e.target.value.trim();
+          const seq = ++side.seq;
+          side.found = [];
+          side.pending = q.length >= 2;
+          if (q.length < 2) return paintHub(s);
+          paintHub(s);
+          side.timer = setTimeout(async () => {
+            let found = [];
+            if (mode === 'train') {
+              // 열차: 이미 불러온 TAGO 역 목록에서 이름으로 찾는다 (외부 검색 없음)
+              try { await TP.train.load(); } catch (_) { /* 빈 결과로 */ }
+              found = TP.train.searchStations(place, q, 8);
+            } else {
+              // 버스: 카카오 키워드 검색에서 고속·시외버스터미널로 분류된 곳만 ('<검색어> 터미널'도 함께 찾아 빠짐을 줄인다)
+              const lists = await Promise.all([q, `${q} 터미널`].map((k) => TP.geocode.search(k).catch(() => [])));
+              const seen = new Set();
+              found = lists.flat().filter((r) => {
+                const id = `${r.name}|${r.lat}|${r.lon}`;
+                if (r.hub !== mode || seen.has(id)) return false;
+                seen.add(id);
+                return true;
+              }).slice(0, 8);
+            }
+            if (seq !== side.seq || !hubState) return;
+            side.pending = false;
+            side.found = found;
+            paintHub(s);
+          }, TP.geocode.debounceMs());
+        });
+        box.addEventListener('change', (e) => {
+          if (e.target.name !== `hubPick-${s}`) return;
+          side.pick = [...(side.recs || []), ...side.found][Number(e.target.value)];
+          $('#hubSubmit').disabled = !Object.values(hubState.sides).every((x) => x.pick);
+          if (mode === 'train' && s === 'dep' && hubState.sides.arr) hubState.sides.arr.refresh(); // 출발역이 정해지면(바뀌면) 도착역 목록을 다시 거른다
+        });
+        if (mode === 'train') {
+          // 열차: 장소에서 20km 안의 TAGO 역을 가까운 순으로. 반대쪽 역을 알면 그 날 열차가 있는 역만 (열차 수를 함께 보여 준다)
+          const other = s === 'dep' ? 'arr' : 'dep';
+          const near = TP.train.load().then(() => TP.train.nearStations(place));
+          side.refresh = async () => {
+            const seq = ++side.recSeq;
+            side.pick = null;
+            $('#hubSubmit').disabled = true;
+            const fixed = need[other] ? (hubState.sides[other] || {}).pick : (s === 'dep' ? to : from);
+            if (need[other] && !fixed && s === 'arr') { side.recs = []; side.status = 'wait'; return paintHub(s); } // 출발역을 먼저 골라야 한다
+            side.recs = null;
+            side.status = 'loading';
+            paintHub(s);
+            const all = await near;
+            let recs = all;
+            let status = all.length ? 'ok' : 'nocity';
+            if (all.length && fixed && inWin) {
+              const counts = await TP.train.countAll(all, fixed, s, ymd, 3);
+              recs = TP.train.withTrains(all, counts);
+              if (!recs.length) status = 'none';
+            } else if (all.length && !inWin) status = 'period';
+            if (!hubState || seq !== side.recSeq) return;
+            side.recs = recs.slice(0, HUB_REC_MAX);
+            side.status = status;
+            paintHub(s);
+          };
+          Promise.resolve().then(side.refresh); // 칸이 화면에 붙은 뒤 그린다
+        } else {
+          TP.geocode.nearbyHubs(place, mode).then((list) => {
+            if (hubState && hubState.sides[s] === side) { side.recs = list.slice(0, HUB_REC_MAX); side.status = 'ok'; paintHub(s); }
+          });
+        }
+        return box;
+      })
+    );
+    $('#hubSubmit').disabled = true;
+    paintHub('dep');
+    paintHub('arr');
+    $('#hubDialog').showModal();
+  }
+
+  function paintHub(s) {
+    const side = hubState && hubState.sides[s];
+    if (!side) return;
+    const [, searchBox, recList, foundList] = $(`#hubSide-${s}`).children;
+    const q = searchBox.value.trim(); // 검색어가 있으면 추천은 숨기고 검색 결과만 보여 준다
+    recList.hidden = Boolean(q);
+    foundList.hidden = !q;
+    const nRecs = (side.recs || []).length;
+    const opt = (r, i) => {
+      const radio = el('input', { type: 'radio', name: `hubPick-${s}`, value: String(i) });
+      radio.checked = side.pick === r;
+      return el('label', { class: 'route-opt' }, [
+        radio,
+        el('div', { class: 'route-opt-head' }, [el('strong', { text: r.name }), el('span', { class: 'grow' }), el('span', { class: 'muted-s', text: [distText(r.distance), r.count != null ? `${r.count}편` : ''].filter(Boolean).join(' · ') })]),
+        r.displayName ? el('span', { class: 'muted-s', text: r.displayName }) : null,
+      ]);
+    };
+    const w = hubWord(hubState.mode);
+    const msg = {
+      loading: hubState.mode === 'train' ? `${w}을 찾고 열차가 있는지 확인하는 중…` : '가까운 곳을 찾는 중…',
+      wait: '출발역을 먼저 골라 주세요',
+      none: '이 날 조회된 열차가 없어요. 역 이름으로 검색해 주세요',
+      nocity: `20km 안에 열차${w}이 없어요. ${w} 이름으로 검색해 주세요`,
+      ok: `근처에서 조회할 수 있는 ${w}을 찾지 못했어요. 위에서 검색해 주세요.`,
+    }[side.status];
+    const note = side.status === 'period' ? el('p', { class: 'hub-empty', text: '열차 조회 기간(약 4주) 밖이라 열차가 있는지 확인하지 못했어요' }) : null;
+    recList.replaceChildren(...(nRecs ? [...(note ? [note] : []), ...side.recs.map(opt)] : [el('p', { class: 'hub-empty', text: msg || '' })]));
+    foundList.replaceChildren(...(q && !side.found.length ? [el('p', { class: 'hub-empty', text: q.length < 2 ? '두 글자 이상 입력해 주세요' : side.pending ? '검색하는 중…' : '검색 결과가 없어요' })] : side.found.map((r, i) => opt(r, nRecs + i))));
+  }
+
+  function submitHub() {
+    const st = hubState;
+    if (!st || Object.values(st.sides).some((x) => !x.pick)) return;
+    st.done = true;
+    $('#hubDialog').close();
+    const items = day().items;
+    const idx = items.findIndex((x) => x.id === st.itemId);
+    if (idx < 1) return;
+    const picks = {};
+    for (const k of Object.keys(st.sides)) picks[k] = st.sides[k].pick;
+    const out = P.planHubInsert(items, idx, st.mode, picks);
+    day().items = out;
+    const added = out.filter((x) => !items.some((o) => o.id === x.id)).map((x) => x.name);
+    S.save();
+    renderAll({ fit: true });
+    toast(added.length ? `${added.join('·')}을(를) 일정에 넣었어요` : `${st.mode === 'train' ? '열차' : '버스'}로 바꿨어요`);
+  }
+
+  let editingTrainId = null;
+
+  /** 열차 편 선택 다이얼로그: 조회된 열차를 라디오로 보여주고 고른 편을 저장한다 (기본 편으로 = 저장된 편 지우기) */
+  function openTrainDialog(itemId) {
+    const rows = model.days[S.state.dayIndex].rows;
+    const i = rows.findIndex((r) => !r.carry && r.item.id === itemId && r.leg && r.leg.trips);
+    if (i < 1) return;
+    const row = rows[i];
+    const leg = row.leg;
+    const prevRow = rows[i - 1];
+    const arrive = prevRow.arrival; // 역 도착 시각
+    const defDep = (leg.trips.find((t) => t.dep >= arrive + (prevRow.carry ? 0 : prevRow.item.stay)) || {}).dep;
+    const cur = leg.service;
+    editingTrainId = itemId;
+    $('#trainDialogSub').textContent = `${leg.from.name} → ${row.item.name} · 역 도착 ${F.fmtTime(arrive)}`;
+    $('#trainList').replaceChildren(...leg.trips.map((t, n) => {
+      const isCur = Boolean(cur) && cur.dep === t.dep && (cur.no ? cur.no === t.no : cur.type === t.type);
+      const radio = el('input', { type: 'radio', name: 'trainPick', value: String(n) });
+      radio.checked = isCur;
+      return el('label', { class: 'route-opt' }, [
+        radio,
+        el('div', { class: 'route-opt-head' }, [
+          el('strong', { text: `${F.fmtTime(t.dep)} → ${F.fmtTime(t.arr < t.dep ? t.arr + 1440 : t.arr)}` }),
+          el('span', { class: 'muted-s', text: F.fmtDuration(P.serviceMin(t)) }),
+          t.dep === defDep ? el('span', { class: 'tag accent', text: '기본' }) : null,
+          isCur ? el('span', { class: 'tag', text: '현재' }) : null,
+          t.dep < arrive ? el('span', { class: 'tag warn', text: '놓침' }) : null,
+          el('span', { class: 'grow' }),
+          el('strong', { text: t.charge != null ? won(t.charge) : '요금 미상' }),
+        ]),
+        el('span', { class: 'muted-s', text: [t.type, t.no].filter(Boolean).join(' ') }),
+      ]);
+    }));
+    $('#trainDialog').showModal();
+    // 이른 시각의 놓친 열차부터 보이지 않게 현재 편(없으면 기본 편)으로 스크롤
+    const focusIdx = leg.trips.findIndex((t) => (cur ? cur.dep === t.dep && (cur.no ? cur.no === t.no : cur.type === t.type) : t.dep === defDep));
+    const focusEl = focusIdx >= 0 && $('#trainList').children[focusIdx];
+    if (focusEl) focusEl.scrollIntoView({ block: 'center' });
+  }
+
+  function submitTrain(useDefault) {
+    const id = editingTrainId;
+    const it = id && day().items.find((x) => x.id === id);
+    const row = model.days[S.state.dayIndex].rows.find((r) => !r.carry && r.item.id === id && r.leg);
+    const picked = $('#trainList').querySelector('input[name="trainPick"]:checked');
+    $('#trainDialog').close();
+    if (!it || !row) return;
+    if (useDefault) it.legService = null;
+    else if (picked) {
+      const t = row.leg.trips[Number(picked.value)];
+      it.legService = { kind: 'train', type: t.type, grade: null, no: t.no, dep: t.dep, arr: t.arr };
+    } else return;
+    S.save();
+    renderAll();
+  }
+
   function submitRoute() {
     const picked = $('#routeList').querySelector('input[name="routePick"]:checked');
     const id = editingRouteId;
@@ -1375,9 +1744,29 @@
       const v = Number(raw);
       return clear || raw === '' || !isFinite(v) ? null : Math.round(Math.min(max, Math.max(0, v)));
     };
-    const h = opt('#legHour', 72);
-    const m = opt('#legMin', 59);
-    it.legMin = h == null && m == null ? null : Math.min(1440 * 3, (h || 0) * 60 + (m || 0)); // 한쪽만 비우면 0으로 본다
+    if (P.isHubMode(editingLegMode) && !clear) {
+      const dep = $('#legSvcDep').value;
+      const arr = $('#legSvcArr').value;
+      if (!dep || !arr) return showLegError('출발 시각과 도착 시각을 모두 입력해 주세요.');
+      const train = editingLegMode === 'train';
+      const text = (sel) => $(sel).value.trim().slice(0, 20) || null;
+      const kind = $('#legSvcKind').value;
+      const gradeOk = (g) => (g && !P.busGrades(kind).includes(g) ? null : g);
+      it.legService = {
+        kind: train ? 'train' : kind || null,
+        type: train ? text('#legSvcType') : null,
+        grade: train ? null : gradeOk(text('#legSvcGrade')),
+        no: train ? text('#legSvcNo') : null,
+        dep: F.parseTime(dep),
+        arr: F.parseTime(arr),
+      };
+      it.legMin = null; // 시간은 편이 정한다
+    } else {
+      const h = opt('#legHour', 72);
+      const m = opt('#legMin', 59);
+      it.legMin = h == null && m == null ? null : Math.min(1440 * 3, (h || 0) * 60 + (m || 0)); // 한쪽만 비우면 0으로 본다
+      if (clear) it.legService = null;
+    }
     it.legCost = opt('#legCost', 1e8);
     S.save();
     $('#legDialog').close();
@@ -1425,7 +1814,7 @@
       group: '이동 시간 추정',
       fields: [
         { path: 'est.autoWalkKm', label: '자동 선택: 도보 기준 거리', unit: 'km', min: 0, step: 0.1 },
-        { path: 'est.noRouteWalkKm', label: '대중교통 경로 없을 때 도보로 계산할 거리', unit: 'km' },
+        { path: 'est.noRouteWalkKm', label: '대중교통 경로 없을 때 도보 안내할 거리', unit: 'km' },
         { path: 'est.walk', label: '도보 속도 (조회 실패 시)', unit: 'km/h', min: 0.5, step: 0.5 },
         { path: 'est.bike', label: '자전거 속도 (조회 실패 시)', unit: 'km/h', min: 1, step: 1 },
         { path: 'est.car', label: '자동차 속도 (조회 실패 시)', unit: 'km/h', min: 1, step: 1 },
@@ -1461,7 +1850,7 @@
       ])
     ), el('fieldset', {}, [
       el('legend', { text: '요금 추정 기준' }),
-      el('p', { class: 'hint', text: '택시 비용은 서울 요금 기준으로 추정해요. 대중교통 경로를 찾지 못한 구간은 시간을 도보(2km 이하) 또는 자동차 기준으로 계산하고 요금은 미정으로 둬요. 실제 금액은 구간에서 직접 입력할 수 있어요.' }),
+      el('p', { class: 'hint', text: '택시 비용은 서울 요금 기준으로 추정해요. 대중교통 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 둬요. 실제 금액은 구간에서 직접 입력할 수 있어요.' }),
       el('details', { class: 'fixed-settings' }, [
         el('summary', { text: '추정 기준 보기' }),
         ...FIXED_SCHEMA.map((g) =>
@@ -1903,8 +2292,22 @@
     $('#tripForm').addEventListener('submit', (e) => { e.preventDefault(); submitTrip(); });
     $('#tripStart').addEventListener('input', () => { syncTripDates(true); showTripError(''); });
     $('#tripEnd').addEventListener('input', () => { syncTripDates(false); showTripError(''); });
+    $('#legSvcKind').addEventListener('change', () => {
+      const g = $('#legSvcGrade');
+      const list = P.busGrades($('#legSvcKind').value);
+      fillOptions(g, list, list.includes(g.value) ? g.value : null); // 새 목록에 없으면 비운다
+      g.disabled = !list.length;
+    });
     $('#legForm').addEventListener('submit', (e) => { e.preventDefault(); submitLeg(false); });
     $('#routeForm').addEventListener('submit', (e) => { e.preventDefault(); submitRoute(); });
+    $('#hubForm').addEventListener('submit', (e) => { e.preventDefault(); submitHub(); });
+    $('#hubDialog').addEventListener('close', () => {
+      const st = hubState;
+      hubState = null;
+      if (st && !st.done) renderAll(); // 취소: 이동수단 선택 표시를 원래대로
+    });
+    $('#trainForm').addEventListener('submit', (e) => { e.preventDefault(); submitTrain(false); });
+    $('#btnTrainDefault').addEventListener('click', () => submitTrain(true));
     $('#btnLegClear').addEventListener('click', () => submitLeg(true));
     $('#itemForm').addEventListener('submit', (e) => { e.preventDefault(); submitItem(); });
     $('#settingsForm').addEventListener('submit', (e) => { e.preventDefault(); submitSettings(); });

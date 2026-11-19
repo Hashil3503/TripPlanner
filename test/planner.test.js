@@ -10,11 +10,11 @@ globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} }
 const fare = require('../public/js/fare.js');
 const TP = globalThis.TP;
 
+let hav = 100000; // 테스트가 바꾸는 직선거리(m)
 let route = null; // 테스트가 바꿔 끼우는 캐시 경로 (null = 아직 조회 전)
 TP.routing = {
   profileFor: (m) => (m === 'walk' ? 'foot' : m === 'bike' ? 'bike' : m === 'transit' ? 'transit' : 'car'),
-  fallbackProfile: () => 'car',
-  haversine: () => 100000,
+  haversine: () => hav,
   peek: () => route,
   estimateRoute: () => ({ distance: 1000, duration: 60, geometry: [], estimated: true }),
   NO_ROUTE_REASON: '대중교통 경로 없음(도시 간 이동·너무 가까운 거리 등)',
@@ -27,7 +27,7 @@ const cfg = (people = 1) => ({ ...fare.DEFAULT_CONFIG, people });
 const A = { lat: 37.55, lon: 126.97 };
 const item = (o) => ({ id: 'b', name: 'B', lat: 35.1, lon: 129.0, stay: 60, cost: 0, parking: 0, modeIn: 'transit', transitIdx: null, legMin: null, legCost: null, ...o });
 // 대중교통 조회 실패 후 대체 경로(도보/자동차) 상태 (서울 -> 부산 약 400km, 4시간 30분)
-const carFallback = (km = 400, sec = 16200) => ({ distance: km * 1000, duration: sec, geometry: [], estimated: false, fallbackReason: '경로 없음', fallbackBy: 'car' });
+const carFallback = (km = 400, sec = 16200) => ({ distance: km * 1000, duration: sec, geometry: [], estimated: false, fallbackReason: '경로 없음' });
 
 test('대중교통 대체: 거리와 무관하게 대체 경로의 시간을 쓰고 요금은 미정', () => {
   for (const [km, sec] of [[400, 16200], [30, 2400]]) {
@@ -37,9 +37,20 @@ test('대중교통 대체: 거리와 무관하게 대체 경로의 시간을 쓰
     assert.equal(leg.cost.unknown, true);
     assert.equal(leg.cost.total, 0);
     assert.equal(leg.cost.perPerson, 0);
-    assert.equal(leg.fallbackBy, 'car');
     assert.deepEqual(leg.override, { min: false, cost: false });
   }
+});
+
+test('대중교통 대체: 가까우면 자동차 기준 + nearWalk, 멀면 nearWalk 아님', () => {
+  route = carFallback(3, 600);
+  hav = 1500;
+  assert.equal(P.computeLeg(A, item(), cfg(), 540).nearWalk, true);
+  hav = 2000;
+  assert.equal(P.computeLeg(A, item(), cfg(), 540).nearWalk, true); // 경계 포함
+  hav = 2001;
+  assert.equal(P.computeLeg(A, item(), cfg(), 540).nearWalk, false);
+  hav = 100000;
+  assert.equal(P.computeLeg(A, item(), cfg(), 540).nearWalk, false);
 });
 
 test('noRoute: 카카오가 경로 없음이라고 답한 경우만 true', () => {
@@ -305,4 +316,196 @@ test('buildTrip: 마지막 장소 체류가 자정을 넘기면 다음 날 맨 �
   const t2 = { days: [{ startTime: '21:00', items: [hotel] }, { startTime: '09:00', items: [{ ...hotel, id: 'h2' }, cafe] }] };
   assert.equal(P.buildTrip(t2, cfg()).days[1].rows[0].carry, undefined);
   route = null;
+});
+
+// ---- 열차·버스(TP-018-1) ----
+const svc = (dep, arr, o) => ({ kind: 'train', type: 'KTX', grade: null, no: '105', dep, arr, ...o });
+const hubItem = (mode, o) => item({ id: 'b', modeIn: mode, stay: 60, ...o });
+
+test('열차: 편이 있으면 소요시간은 도착-출발, 요금은 직접 입력 1인 x 인원, 거리는 직선거리 x 우회계수', () => {
+  route = null; // 경로를 조회하지 않는다
+  const leg = P.computeLeg(A, hubItem('train', { legService: svc(600, 730), legCost: 59800 }), cfg(2), 600);
+  assert.equal(leg.mode, 'train');
+  assert.equal(leg.loading, false);
+  assert.equal(leg.durationMin, 130);
+  assert.equal(leg.distance, 100000 * fare.DEFAULT_CONFIG.est.detour);
+  assert.equal(leg.cost.perPerson, 59800);
+  assert.equal(leg.cost.total, 59800 * 2);
+  assert.equal(leg.noService, false);
+  assert.equal(leg.curve, true);
+  // 편 소요 시간은 legMin 직접 입력을 따르지 않는다
+  assert.equal(P.computeLeg(A, hubItem('train', { legService: svc(600, 730), legMin: 5 }), cfg(), 600).durationMin, 130);
+});
+
+test('열차: 요금 입력이 없으면 요금 미정, 외부(조회) 요금·편을 넘기면 그대로 반영', () => {
+  const leg = P.computeLeg(A, hubItem('train', { legService: svc(600, 730) }), cfg(3), 600);
+  assert.equal(leg.cost.unknown, true);
+  assert.equal(leg.cost.total, 0);
+  const api = P.computeLeg(A, hubItem('train'), cfg(3), 600, { service: svc(600, 700), fare: 30000 });
+  assert.equal(api.durationMin, 100);
+  assert.equal(api.cost.total, 90000);
+});
+
+test('열차·버스: 자정을 넘기는 편은 다음 날 도착으로 계산', () => {
+  assert.equal(P.computeLeg(A, hubItem('train', { legService: svc(1380, 60) }), cfg(), 1380).durationMin, 120);
+  route = { distance: 300000, duration: 9000, geometry: [], estimated: false };
+  const bus = P.computeLeg(A, hubItem('bus', { legService: svc(1410, 30, { kind: 'express', grade: '심야우등', no: null, type: null }) }), cfg(), 1410);
+  assert.equal(bus.durationMin, 60);
+  assert.equal(bus.distance, 100000 * fare.DEFAULT_CONFIG.est.detour); // 버스도 노선 경로를 몰라 직선거리 x 우회계수 (도로 경로 무시)
+  route = null;
+});
+
+test('열차·버스: 편이 없으면 시간 0(미정)·요금 미정, 경로를 조회하지 않는다', () => {
+  route = null;
+  for (const mode of ['train', 'bus']) {
+    const leg = P.computeLeg(A, hubItem(mode), cfg(2), 600);
+    assert.equal(leg.noService, true);
+    assert.equal(leg.durationMin, 0);
+    assert.equal(leg.loading, false);
+    assert.equal(leg.cost.unknown, true);
+    assert.equal(leg.distance, 100000 * fare.DEFAULT_CONFIG.est.detour);
+  }
+});
+
+test('buildDay: 편 출발 시각이 앞 장소의 종료 시각 - 일찍 도착하면 대기, 도착은 출발 + 소요', () => {
+  const d = build([first(), hubItem('train', { legService: svc(600, 730) })]); // 역 도착 09:00, 출발 10:00 -> 체류 시간과 상관없이 60분 대기
+  const r0 = d.rows[0];
+  assert.equal(r0.departure, 600);
+  assert.equal(r0.svcWaitMin, 60);
+  assert.equal(r0.svcMissMin, 0);
+  assert.deepEqual(r0.anchor, { dep: 600, mode: 'train' });
+  assert.equal(d.rows[1].leg.depMin, 600);
+  assert.equal(d.rows[1].arrival, 730);
+  assert.equal(d.stats.travelMin, 130);
+});
+
+test('buildDay: 출발 시각이 지난 뒤 도착하면 놓침, 이후 시각은 그 편 기준으로 계속 계산', () => {
+  const d = build([first(), hubItem('bus', { legService: svc(555, 700, { kind: 'express' }) })]); // 09:00 도착, 체류 30분, 버스 09:15 출발
+  // 첫 장소는 도착(=시작)이 09:00이라 놓치지 않고 체류가 잘린다
+  assert.equal(d.rows[0].svcMissMin, 0);
+  assert.equal(d.rows[0].departure, 555);
+  const d2 = build([first({ fixedStart: '09:30' }), hubItem('bus', { legService: svc(555, 700) })]);
+  assert.equal(d2.rows[0].svcMissMin, 15);
+  assert.equal(d2.rows[0].departure, 570);
+  assert.equal(d2.rows[1].arrival, 700); // 출발 09:15 기준
+});
+
+test('buildDay: 편이 정해진 열차 앞 장소의 fixedEnd는 무시, 편이 없으면 평소 계산 (시간 0)', () => {
+  const d = build([first({ fixedEnd: '09:20' }), hubItem('train', { legService: svc(600, 700) })]);
+  assert.equal(d.rows[0].departure, 600);
+  assert.equal(d.rows[0].endLateMin, 0);
+  const none = build([first(), hubItem('train')]); // 편 미정: 앞 장소는 닻이 없고 다음 장소는 역 출발 시각에 도착
+  assert.equal(none.rows[0].anchor, null);
+  assert.equal(none.rows[1].arrival, 570);
+  assert.equal(none.rows[1].leg.durationMin, 0);
+});
+
+test('buildTrip: 열차·버스 비용은 byMode에 따로 집계', () => {
+  const trip = { days: [{ startTime: '09:00', items: [first(), hubItem('train', { legService: svc(600, 700), legCost: 50000 })] }] };
+  const m = P.buildTrip(trip, cfg(2));
+  assert.equal(m.totals.byMode.train, 100000);
+  assert.equal(m.totals.byMode.bus, 0);
+});
+
+test('normItem: 열차·버스 편과 hub를 검증해 보존', () => {
+  const base = { name: 'x', lat: 1, lon: 2 };
+  const n = TP.store.normItem({ ...base, modeIn: 'train', hub: 'train', legService: { kind: 'bus', type: ' KTX ', no: '105', grade: '우등', dep: 600, arr: 730 } });
+  assert.deepEqual(n.legService, { kind: 'train', type: 'KTX', grade: null, no: '105', dep: 600, arr: 730 });
+  assert.equal(n.hub, 'train');
+  const b = TP.store.normItem({ ...base, modeIn: 'bus', legService: { kind: 'express', grade: '우등', type: 'KTX', dep: 0, arr: 1439 } });
+  assert.deepEqual(b.legService, { kind: 'express', type: null, grade: '우등', no: null, dep: 0, arr: 1439 });
+  assert.equal(TP.store.normItem({ ...base, modeIn: 'bus', legService: { kind: 'etc', dep: 1, arr: 2 } }).legService.kind, null);
+  assert.equal(TP.store.normItem({ ...base, modeIn: 'bus', legService: { dep: 1, arr: 2, grade: 'x'.repeat(50) } }).legService.grade.length, 20);
+  for (const bad of [{ dep: 600 }, { dep: 1440, arr: 1 }, { dep: -1, arr: 1 }, { dep: 1.5, arr: 2 }, { dep: '600', arr: 700 }, null, 'x']) {
+    assert.equal(TP.store.normItem({ ...base, modeIn: 'train', legService: bad }).legService, null);
+  }
+  // 열차·버스가 아닌 이동수단이면 편은 버린다
+  assert.equal(TP.store.normItem({ ...base, modeIn: 'walk', legService: { dep: 1, arr: 2 } }).legService, null);
+  assert.equal(TP.store.normItem({ ...base, hub: 'plane' }).hub, null);
+  assert.equal(TP.store.newItem({}).legService, null);
+});
+
+// ---- 열차 시간표 조회 연동 (TP-018-1 3단계) ----
+const trip = (no, dep, arr, charge = 50000) => ({ no, type: 'KTX', dep, arr, charge });
+const TRIPS = [trip('101', 480, 600, 40000), trip('103', 570, 700, 50000), trip('105', 600, 730, 60000)]; // 08:00, 09:30, 10:00
+const lookupDay = (items) => P.buildDay(fixedDay(items), 0, cfg(2), null, '20261125');
+const withLookup = (lk, fn) => {
+  TP.train = { peek: () => lk };
+  try { return fn(); } finally { delete TP.train; }
+};
+const OK = { state: 'ok', trips: TRIPS };
+
+test('열차 기본 편: 역 도착 + 체류 이후 첫 열차, 요금은 API 1인 요금 x 인원, 닻도 기본 편 출발에 맞춘다', () => {
+  withLookup(OK, () => {
+    // 09:00 도착 + 체류 30분 = 09:30 -> 103편(09:30). 체류가 31분이면 105편
+    const m = lookupDay([first(), hubItem('train')]);
+    const leg = m.rows[1].leg;
+    assert.equal(leg.serviceDefault, true);
+    assert.equal(leg.service.no, '103');
+    assert.equal(leg.apiFare, true);
+    assert.equal(leg.cost.total, 100000);
+    assert.deepEqual(m.rows[0].anchor, { dep: 570, mode: 'train' });
+    assert.equal(m.rows[0].departure, 570);
+    assert.equal(m.rows[1].arrival, 700); // dep + 소요
+    assert.equal(lookupDay([first({ stay: 31 }), hubItem('train')]).rows[1].leg.service.no, '105');
+  });
+});
+
+test('열차 기본 편: 이후 출발 열차가 없으면 편 미정(none-left), 앞 장소 닻 없음', () => {
+  withLookup(OK, () => {
+    const m = lookupDay([first({ stay: 200 }), hubItem('train')]);
+    assert.equal(m.rows[1].leg.noService, true);
+    assert.deepEqual(m.rows[1].leg.lookup, { state: 'none', reason: 'none-left' });
+    assert.equal(m.rows[0].anchor, null);
+  });
+});
+
+test('열차 저장된 편: 시간표에 있으면 요금만 맞추고 편은 그대로, 없으면 svcNotListed (자동 교체 없음)', () => {
+  withLookup(OK, () => {
+    const hit = lookupDay([first(), hubItem('train', { legService: svc(600, 730) })]).rows[1].leg;
+    assert.equal(hit.serviceDefault, false);
+    assert.equal(hit.svcNotListed, false);
+    assert.equal(hit.apiFare, true);
+    assert.equal(hit.cost.perPerson, 60000);
+    // 직접 입력한 요금이 우선
+    const own = lookupDay([first(), hubItem('train', { legService: svc(600, 730), legCost: 1000 })]).rows[1].leg;
+    assert.equal(own.cost.perPerson, 1000);
+    assert.equal(own.apiFare, false);
+    const miss = lookupDay([first(), hubItem('train', { legService: svc(615, 730) })]).rows[1].leg;
+    assert.equal(miss.svcNotListed, true);
+    assert.equal(miss.service.dep, 615);
+    assert.equal(miss.cost.unknown, true);
+  });
+});
+
+test('열차 조회: loading 이면 구간도 loading, 기간 밖이면 period 이유와 함께 편 미정', () => {
+  withLookup({ state: 'loading' }, () => assert.equal(lookupDay([first(), hubItem('train')]).rows[1].leg.loading, true));
+  withLookup({ state: 'none', reason: 'period' }, () => {
+    const leg = lookupDay([first(), hubItem('train')]).rows[1].leg;
+    assert.equal(leg.loading, false);
+    assert.equal(leg.noService, true);
+    assert.equal(leg.lookup.reason, 'period');
+  });
+  // 날짜가 없으면(ymd 없음) 조회하지 않는다
+  withLookup(OK, () => assert.equal(P.buildDay(fixedDay([first(), hubItem('train')]), 0, cfg()).rows[1].leg.noService, true));
+});
+
+test('buildDay: 편 출발이 도착 후 10분 이내면 svcTight, 11분이면 아니고, 놓치면 놓침 경고만', () => {
+  const at = (dep) => build([first(), hubItem('train', { legService: svc(dep, dep + 100) })]).rows[0]; // 역 도착 09:00 (540)
+  assert.equal(at(545).svcTight, true);
+  assert.equal(at(550).svcTight, true);
+  assert.equal(at(540).svcTight, true);
+  assert.equal(at(551).svcTight, false);
+  const missed = at(530);
+  assert.equal(missed.svcTight, false);
+  assert.equal(missed.svcMissMin, 10);
+  assert.equal(P.TIGHT_TRANSFER_MIN, 10);
+});
+
+test('busGrades: 종류별 TAGO 등급 목록, 종류 미선택이면 비어 있다', () => {
+  const g = TP.planner.busGrades;
+  assert.deepEqual(g('express'), ['일반', '고속', '우등', '프리미엄', '일반심야', '심야고속', '심야우등', '심야프리미엄']);
+  assert.deepEqual(g('intercity'), ['일반', '우등', '프리미엄', '심야일반', '심야우등', '심야프리', '주말프리', '주말심프']);
+  assert.deepEqual(g(''), []);
+  assert.deepEqual(g(null), []);
 });

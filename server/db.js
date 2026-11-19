@@ -72,7 +72,8 @@ function open(dbPath) {
     setSettings: db.prepare('UPDATE users SET settings_json = ? WHERE id = ?'),
     getTransit: db.prepare('SELECT json, created_at FROM transit_cache WHERE key = ?'),
     putTransit: db.prepare('INSERT OR REPLACE INTO transit_cache (key, json, created_at) VALUES (?, ?, ?)'),
-    purgeTransit: db.prepare('DELETE FROM transit_cache WHERE created_at < ?'),
+    purgeTransit: db.prepare("DELETE FROM transit_cache WHERE created_at < ? AND key NOT LIKE 'tago-%'"),
+    purgeTago: db.prepare("DELETE FROM transit_cache WHERE created_at < ? AND key LIKE 'tago-%'"),
   };
 
   return {
@@ -98,6 +99,7 @@ function open(dbPath) {
     getTransit: (key) => q.getTransit.get(key),
     putTransit: (key, json, at) => q.putTransit.run(key, json, at),
     purgeTransit: (before) => q.purgeTransit.run(before),
+    purgeTago: (before) => q.purgeTago.run(before),
   };
 }
 

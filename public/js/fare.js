@@ -30,9 +30,9 @@
       walk: 4.5, // km/h (경로 조회 실패 시 추정용)
       bike: 15,
       car: 30,
-      detour: 1.3, // 직선거리 -> 도로거리 보정 계수
+      detour: 1.26, // 직선거리 -> 도로거리 보정 계수 (열차 거리 추정에도 사용)
       autoWalkKm: 1.2, // 자동 이동수단: 이 거리 이하면 도보
-      noRouteWalkKm: 2, // 대중교통 경로가 없을 때 이 직선거리(km) 이하는 도보, 초과는 자동차 시간으로 계산
+      noRouteWalkKm: 2, // 대중교통 경로가 없을 때 이 직선거리(km) 이하면 도보로 바꾸라고 안내(시간은 항상 자동차 기준)
     },
   };
 
@@ -45,6 +45,8 @@
     { id: 'transit', label: '대중교통', emoji: '🚌' },
     { id: 'taxi', label: '택시', emoji: '🚕' },
     { id: 'car', label: '자가용', emoji: '🚗' },
+    { id: 'train', label: '열차', emoji: '🚆' },
+    { id: 'bus', label: '버스(고속·시외)', emoji: '🚍' },
   ];
 
   const roundTo = (n, unit) => Math.round(n / unit) * unit;
@@ -142,7 +144,9 @@
       return out;
     }
     switch (opts.mode) {
-      case 'transit': {
+      case 'transit':
+      case 'train': // 열차·고속/시외버스도 같은 규칙: 1인 요금 x 인원, 요금을 모르면 미정
+      case 'bus': {
         let per = opts.fare != null && isFinite(opts.fare) ? opts.fare : null;
         if (per == null) per = rangeFare(opts.fareMin, opts.fareMax, cfg);
         if (per == null) {

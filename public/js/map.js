@@ -150,7 +150,7 @@
     title.append(num, h('strong', null, p.item.name));
     const cat = TP.catOf(p.item.category);
     const sub = h('div', 'popup-sub');
-    sub.append(TP.ui.catIcon(p.item.category), h('span', null, cat.label), h('span', 'popup-dot', '·'), TP.ui.icon('clock'), h('span', null, `${TP.fmt.fmtTime(p.arrival)} 도착`));
+    sub.append(TP.ui.catIcon(p.item.category, TP.planner.hubOf(p.item)), h('span', null, cat.label), h('span', 'popup-dot', '·'), TP.ui.icon('clock'), h('span', null, `${TP.fmt.fmtTime(p.arrival)} 도착`));
     box.append(title, sub);
     return box;
   }
@@ -169,7 +169,7 @@
     };
     box.append(h('div', 'popup-sub leg-tip-route', `${stop(leg.from)} → ${stop(leg.to)}`));
     if (leg.transitReal) box.append(TP.ui.routePills(leg.transitReal.route));
-    const sub = `${TP.fmt.fmtDuration(leg.durationMin)} · ${TP.fmt.fmtDist(leg.distance)} · ${leg.cost.unknown ? '요금 미정' : TP.fmt.fmtWon(leg.cost.total)}`;
+    const sub = `${leg.noService ? '시간 미정' : TP.fmt.fmtDuration(leg.durationMin)} · ${leg.curve ? '약 ' : ''}${TP.fmt.fmtDist(leg.distance)} · ${leg.cost.unknown ? '요금 미정' : TP.fmt.fmtWon(leg.cost.total)}`;
     box.append(h('div', 'popup-sub num', sub));
     return box;
   }
@@ -240,6 +240,20 @@
     items.push(line);
   }
 
+  /** 열차·버스 구간: 두 장소를 잇는 완만한 곡선(2차 베지어를 24등분한 점). 경로선과 구분되도록 점선으로 그린다 */
+  function curvePath(a, b) {
+    const dLat = b.lat - a.lat;
+    const dLon = b.lon - a.lon;
+    const ctrl = [(a.lat + b.lat) / 2 - dLon * 0.18, (a.lon + b.lon) / 2 + dLat * 0.18]; // 중점에서 진행 방향의 수직으로 살짝 벌린다
+    const pts = [];
+    for (let i = 0; i <= 24; i++) {
+      const t = i / 24;
+      const u = 1 - t;
+      pts.push([u * u * a.lat + 2 * u * t * ctrl[0] + t * t * b.lat, u * u * a.lon + 2 * u * t * ctrl[1] + t * t * b.lon]);
+    }
+    return pts;
+  }
+
   function clearItems() {
     for (const o of items) o.setMap(null);
     items.length = 0;
@@ -282,9 +296,10 @@
           }
           continue;
         }
-        const dashed = leg.transit || leg.estimated || leg.loading;
-        if (focus) addGlow(leg, leg.geometry, color, 5, z - 0.5);
-        addLine(leg, leg.geometry, color, dim ? 3 : 5, dim ? 0.35 : 0.85, dashed ? 'dash' : 'solid', z);
+        const dashed = leg.curve || leg.transit || leg.estimated || leg.loading;
+        const path = leg.curve ? curvePath(leg.from, leg.to) : leg.geometry;
+        if (focus) addGlow(leg, path, color, 5, z - 0.5);
+        addLine(leg, path, color, dim ? 3 : 5, dim ? 0.35 : 0.85, dashed ? 'dash' : 'solid', z);
       }
       for (const p of g.points) {
         const selected = p.item.id === model.selectedId;
