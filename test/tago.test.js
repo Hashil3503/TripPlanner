@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { createTago, normTrips, validDate, nameKeys, pickStation } = require('../server/tago');
+const { createTago, createQueue, validDate, nameKeys, pickStation, normTrips, MSG } = require('../server/tago');
 
 // transit_cache 를 흉내 내는 메모리 DB
 function memDb() {
@@ -21,7 +21,7 @@ function make(handler, env = { TP_TAGO_KEY: ' secretkey ' }) {
     calls.push(new URL(url));
     return handler(new URL(url));
   };
-  const t = createTago({ db: memDb(), env, fetchImpl, now: () => 1000 });
+  const t = createTago({ db: memDb(), env, fetchImpl, now: () => 1000, queue: createQueue(0), retryWaitMs: [0, 0] });
   return { t, calls };
 }
 const Q = { dep: 'NAT010000', arr: 'NAT014445', date: '20261126' };
@@ -99,7 +99,7 @@ test('캐시 TTL: 성공 6시간, 결과 없음 1시간', async () => {
   const db = memDb();
   let empty = false;
   const fetchImpl = async () => resp(empty ? ok(undefined) : ok([row('1', '20261126080000', '20261126100000', '1')]));
-  const t = createTago({ db, env: { TP_TAGO_KEY: 'k' }, fetchImpl, now: () => clock });
+  const t = createTago({ db, env: { TP_TAGO_KEY: 'k' }, fetchImpl, now: () => clock, queue: createQueue(0), retryWaitMs: [0, 0] });
   await t.trips(Q, 'ip');
   clock += 5 * 3600 * 1000;
   assert.strictEqual((await t.trips(Q, 'ip')).cache, 'HIT');
@@ -199,7 +199,7 @@ test('stations: 카카오 키워드 검색으로 좌표를 붙인다 (기차역 
     if (u.pathname.endsWith('GetCtyCodeList')) return resp(ok([{ citycode: '11', cityname: '서울특별시' }]));
     return resp(ok(['서울', '김천구미', '판교(경기)', '춘천', '부산', '일산', '대전', '제주'].map((n, i) => ({ nodeid: `NAT00000${i}`, nodename: n }))));
   };
-  const t = createTago({ db: memDb(), env: { TP_TAGO_KEY: 'k', TP_KAKAO_REST_KEY: ' kk ' }, fetchImpl, now: () => 1000 });
+  const t = createTago({ db: memDb(), env: { TP_TAGO_KEY: 'k', TP_KAKAO_REST_KEY: ' kk ' }, fetchImpl, now: () => 1000, queue: createQueue(0), retryWaitMs: [0, 0] });
   const r = await t.stations('ip');
   assert.deepStrictEqual(r.body.stations.map((s) => [s.name, s.lat, s.lon]), [
     ['서울', 37.55, 126.97], ['김천구미', 36.11, 128.18], ['판교(경기)', 37.39, 127.11], ['춘천', 4, 4], ['부산', null, null], ['일산', null, null], ['대전', 8, 8], ['제주', null, null],
@@ -257,4 +257,56 @@ test('호출 제한: 캐시 미스만 IP당 분당 30회, 캐시 적중은 제�
   assert.strictEqual((await t.trips({ ...Q, date: '20261231' }, '1.1.1.1')).status, 429);
   assert.strictEqual((await t.trips({ ...Q, date: '20261231' }, '2.2.2.2')).status, 200); // 다른 IP
   assert.strictEqual((await t.trips({ ...Q, date: '20261201' }, '1.1.1.1')).cache, 'HIT'); // 캐시는 제한과 무관
+});
+
+test('createQueue: FIFO로 하나씩 실행하고, 실패한 작업 뒤에도 계속 실행', async () => {
+  const run = createQueue(0);
+  const order = [];
+  let running = 0;
+  let maxRunning = 0;
+  const job = (i, fail) => run(async () => {
+    running++;
+    maxRunning = Math.max(maxRunning, running);
+    await new Promise((r) => setTimeout(r, 5));
+    running--;
+    order.push(i);
+    if (fail) throw new Error('boom');
+    return i;
+  });
+  const results = await Promise.allSettled([job(1), job(2, true), job(3), job(4)]);
+  assert.deepStrictEqual(order, [1, 2, 3, 4]);
+  assert.strictEqual(maxRunning, 1); // 동시에 두 작업이 돌지 않는다
+  assert.deepStrictEqual(results.map((r) => r.status), ['fulfilled', 'rejected', 'fulfilled', 'fulfilled']);
+  assert.strictEqual(results[2].value, 3);
+});
+
+test('createQueue: 작업 시작 간격을 minIntervalMs 이상 띄운다', async () => {
+  const run = createQueue(30);
+  const started = [];
+  await Promise.all([1, 2, 3].map((i) => run(async () => { started.push(Date.now()); return i; })));
+  assert.strictEqual(started.length, 3);
+  for (let i = 1; i < started.length; i++) assert.ok(started[i] - started[i - 1] >= 25, `${started[i] - started[i - 1]}ms`);
+});
+
+test('초당 한도(코드 23)는 큐로 재시도: 두 번 실패 후 성공하면 결과를 돌려준다', async () => {
+  let n = 0;
+  const { t, calls } = make(() => (++n <= 2 ? resp({ response: { header: { resultCode: '23', resultMsg: 'LIMITED' } } }) : resp(ok([row('1', '20261126080000', '20261126100000', '1000')]))));
+  const r = await t.trips(Q, 'ip');
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.body.trips[0].no, '1');
+  assert.strictEqual(calls.length, 3); // 처음 1회 + 재시도 2회
+});
+
+test('초당 한도(코드 23)가 계속되면 429 quota, 아무것도 캐시하지 않음', async () => {
+  let n = 0;
+  const { t, calls } = make(() => { n++; return resp({ response: { header: { resultCode: '23', resultMsg: 'LIMITED' } } }); });
+  const r = await t.trips(Q, 'ip');
+  assert.strictEqual(r.status, 429);
+  assert.strictEqual(r.body.error, MSG.quota);
+  assert.strictEqual(calls.length, 3); // 처음 1회 + 재시도 2회까지만
+  assert.strictEqual(n, 3);
+  // 오류는 캐시되지 않으므로 다음 요청은 다시 업스트림을 부른다
+  const r2 = await t.trips(Q, 'ip');
+  assert.strictEqual(r2.status, 429);
+  assert.strictEqual(calls.length, 6);
 });

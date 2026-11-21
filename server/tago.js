@@ -19,6 +19,8 @@ const STATIONS_KEY = `${PREFIX}stations`;
 const KAKAO_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
 const KAKAO_CONCURRENCY = 5;
 const ID_RE = /^NAT[0-9A-Z]{5,9}$/;
+const DEFAULT_MIN_INTERVAL_MS = 350;
+const DEFAULT_RETRY_WAIT_MS = [1500, 3000]; // 초당 한도(429/코드 22·23) 재시도 대기
 
 const MSG = {
   noKey: '열차 조회를 쓰려면 서버에 공공데이터포털 TAGO 서비스 키(환경변수 TP_TAGO_KEY)를 설정해 주세요.',
@@ -134,16 +136,120 @@ function pickStation(docs, name, city, others) {
   return best ? { lat: parseFloat(best.y), lon: parseFloat(best.x) } : null;
 }
 
-/** TAGO 오류 코드/본문 -> TagoError. 알 수 없는 오류는 502 */
-function codeError(code, text) {
-  const c = String(code || '');
-  if (c === '22' || c === '23' || /LIMITED_NUMBER_OF_SERVICE_REQUESTS/.test(text || '')) return new TagoError(429, MSG.quota); // 22: 하루 한도, 23: 초당 한도
-  if (['30', '31', '32', '33'].includes(c) || /SERVICE_KEY|SERVICE_ACCESS_DENIED|UNREGISTERED/.test(text || '')) return new TagoError(502, MSG.auth);
-  return new TagoError(502, MSG.upstream);
+/** TAGO 오류 코드/본문 -> TagoError. 알 수 없는 오류는 502 (열차·버스가 메시지만 바꿔 쓴다) */
+function makeCodeError(msg) {
+  const m = msg || MSG;
+  return (code, text) => {
+    const c = String(code || '');
+    if (c === '22' || c === '23' || /LIMITED_NUMBER_OF_SERVICE_REQUESTS/.test(text || '')) return new TagoError(429, m.quota); // 22: 하루 한도, 23: 초당 한도
+    if (['30', '31', '32', '33'].includes(c) || /SERVICE_KEY|SERVICE_ACCESS_DENIED|UNREGISTERED/.test(text || '')) return new TagoError(502, m.auth);
+    return new TagoError(502, m.upstream);
+  };
+}
+const codeError = makeCodeError(MSG);
+
+const sleep = (ms) => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
+
+/**
+ * TAGO 요청 큐. TAGO는 초당 호출 한도가 있어 열차·버스가 하나의 큐를 공유한다.
+ * run(fn): 작업을 FIFO로 하나씩 실행하고, 앞 작업의 시작 시각에서 minIntervalMs 이상 떨어진 뒤에 시작한다.
+ * 실패한 작업은 체인을 끊지 않는다(호출자에게만 오류를 돌려준다).
+ */
+function createQueue(minIntervalMs) {
+  const gap = Math.max(0, Number(minIntervalMs) || 0);
+  let tail = Promise.resolve();
+  let lastStart = -Infinity;
+  return function run(fn) {
+    const job = tail.then(async () => {
+      const wait = lastStart + gap - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastStart = Date.now();
+      return fn();
+    });
+    tail = job.then(() => {}, () => {}); // 실패해도 다음 작업은 이어진다
+    return job;
+  };
 }
 
 /**
- * opts: { db, env, fetchImpl, now }
+ * TAGO 공통 클라이언트 (열차·버스가 함께 쓴다). fetch 는 항상 큐를 거치고, 초당 한도 오류는 재시도한다.
+ * opts: { env, fetchImpl, queue, retryWaitMs, msg }
+ * 반환: { key, hasKey, call(op, params, base), callAll(op, params, base), request(base, op, params) }
+ */
+function makeClient(opts) {
+  const env = opts.env || process.env;
+  const doFetch = opts.fetchImpl || globalThis.fetch;
+  const queue = opts.queue || createQueue(opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS);
+  const retryWaitMs = Array.isArray(opts.retryWaitMs) ? opts.retryWaitMs : DEFAULT_RETRY_WAIT_MS;
+  const msg = opts.msg || MSG;
+  const toError = opts.toError || codeError;
+  const key = typeof env.TP_TAGO_KEY === 'string' ? env.TP_TAGO_KEY.trim() : '';
+
+  /** 큐를 거쳐 한 번 호출 -> { rows, total }. 오류는 TagoError */
+  async function call(op, params, base) {
+    const u = new URL((base || BASE) + op);
+    u.searchParams.set('serviceKey', key);
+    u.searchParams.set('_type', 'json');
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, String(v));
+    const res = await queue(async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+      try {
+        const r = await doFetch(u.toString(), { signal: ctrl.signal });
+        return { res: r, text: await r.text() };
+      } catch (e) {
+        throw new TagoError(e && e.name === 'AbortError' ? 504 : 502, e && e.name === 'AbortError' ? msg.timeout : msg.network);
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+    if (res.res.status === 401 || res.res.status === 403) throw new TagoError(502, msg.auth);
+    if (res.res.status === 429) throw new TagoError(429, msg.quota);
+    let j;
+    try {
+      j = JSON.parse(res.text);
+    } catch (e) {
+      // 오류가 XML(OpenAPI_ServiceResponse)로 오는 경우
+      const m = /<returnReasonCode>\s*(\d+)\s*<\/returnReasonCode>/.exec(res.text);
+      throw toError(m && m[1], res.text);
+    }
+    const header = j && j.response && j.response.header;
+    if (!res.res.ok || !header) throw toError(j && j.resultCode, '');
+    const code = String(header.resultCode);
+    if (code === '03') return { rows: [], total: 0 }; // NODATA_ERROR
+    if (code !== '00') throw toError(code, '');
+    const total = Number(j.response.body && j.response.body.totalCount);
+    return { rows: itemsOf(j), total: Number.isFinite(total) ? total : 0 };
+  }
+
+  /** 초당 한도(429/코드 22·23)면 잠시 기다렸다가 같은 큐로 다시 시도한다 (최대 retryWaitMs.length 회) */
+  async function request(base, op, params) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await call(op, params, base);
+      } catch (e) {
+        if (!(e instanceof TagoError) || e.status !== 429 || attempt >= retryWaitMs.length) throw e;
+        await sleep(retryWaitMs[attempt]);
+      }
+    }
+  }
+
+  /** 모든 페이지를 모아 반환 */
+  async function callAll(op, params, base) {
+    const all = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const { rows, total } = await request(base, op, { ...params, numOfRows: ROWS, pageNo: page });
+      all.push(...rows);
+      if (!rows.length || all.length >= total) break;
+    }
+    return all;
+  }
+
+  return { key, hasKey: () => Boolean(key), call, callAll, request };
+}
+
+/**
+ * opts: { db, env, fetchImpl, now, queue, retryWaitMs, minIntervalMs }
  * stations(ip) / trips(query, ip) -> Promise<{ status, body, cache }>  (HTTP 응답 그대로 쓸 수 있는 형태)
  */
 function createTago(opts) {
@@ -153,9 +259,10 @@ function createTago(opts) {
   const now = opts.now || Date.now;
   const limiter = auth.createLimiter(RATE_MAX, RATE_WINDOW_MS);
   const inflight = new Map(); // cache key -> Promise<result>
+  const client = makeClient({ env, fetchImpl: doFetch, queue: opts.queue, retryWaitMs: opts.retryWaitMs, minIntervalMs: opts.minIntervalMs });
 
   // 환경변수는 프로세스 시작 시 고정되므로 키를 바꾸면 서버를 재시작해야 한다
-  const key = typeof env.TP_TAGO_KEY === 'string' ? env.TP_TAGO_KEY.trim() : '';
+  const key = client.key;
   const kakaoKey = typeof env.TP_KAKAO_REST_KEY === 'string' ? env.TP_KAKAO_REST_KEY.trim() : '';
 
   function cacheGet(k) {
@@ -171,53 +278,9 @@ function createTago(opts) {
     return now() - row.created_at < ttl ? body : null;
   }
 
-  /** 한 번 호출 -> { rows, total }. 오류는 TagoError */
-  async function call(op, params) {
-    const u = new URL(BASE + op);
-    u.searchParams.set('serviceKey', key);
-    u.searchParams.set('_type', 'json');
-    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, String(v));
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-    let res;
-    let text;
-    try {
-      res = await doFetch(u.toString(), { signal: ctrl.signal });
-      text = await res.text();
-    } catch (e) {
-      throw new TagoError(e && e.name === 'AbortError' ? 504 : 502, e && e.name === 'AbortError' ? MSG.timeout : MSG.network);
-    } finally {
-      clearTimeout(timer);
-    }
-    if (res.status === 401 || res.status === 403) throw new TagoError(502, MSG.auth);
-    if (res.status === 429) throw new TagoError(429, MSG.quota);
-    let j;
-    try {
-      j = JSON.parse(text);
-    } catch (e) {
-      // 오류가 XML(OpenAPI_ServiceResponse)로 오는 경우
-      const m = /<returnReasonCode>\s*(\d+)\s*<\/returnReasonCode>/.exec(text);
-      throw codeError(m && m[1], text);
-    }
-    const header = j && j.response && j.response.header;
-    if (!res.ok || !header) throw codeError(j && j.resultCode, '');
-    const code = String(header.resultCode);
-    if (code === '03') return { rows: [], total: 0 }; // NODATA_ERROR
-    if (code !== '00') throw codeError(code, '');
-    const total = Number(j.response.body && j.response.body.totalCount);
-    return { rows: itemsOf(j), total: Number.isFinite(total) ? total : 0 };
-  }
-
+  const call = (op, params) => client.request(BASE, op, params);
   /** 모든 페이지를 모아 반환 */
-  async function callAll(op, params) {
-    const all = [];
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const { rows, total } = await call(op, { ...params, numOfRows: ROWS, pageNo: page });
-      all.push(...rows);
-      if (!rows.length || all.length >= total) break;
-    }
-    return all;
-  }
+  const callAll = (op, params) => client.callAll(op, params, BASE);
 
   async function fetchStations() {
     const cities = (await callAll('GetCtyCodeList', {})).filter((c) => c.citycode && c.cityname);
@@ -309,4 +372,4 @@ function createTago(opts) {
   };
 }
 
-module.exports = { createTago, normTrips, validDate, nameKeys, pickStation, MSG };
+module.exports = { createTago, createQueue, makeClient, makeCodeError, TagoError, normTrips, validDate, nameKeys, pickStation, MSG };
