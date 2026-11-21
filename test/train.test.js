@@ -117,3 +117,41 @@ test('searchStations: 이름 포함 검색, 좌표 필수, 가까운 순, 개수
   assert.deepEqual(two.map((c) => c.distance), [...two.map((c) => c.distance)].sort((a, b) => a - b)); // 가까운 순
   assert.equal(T.searchStations(place, '김천', 1).length, 1);
 });
+
+test('load: 서버가 좌표를 다 못 채운 표(incomplete)를 주면 1분 뒤 다시 받고, 다시 받기에 실패해도 받아 둔 표를 계속 쓴다', async () => {
+  // 앞 테스트들이 역 목록을 이미 불러온 모듈과 섞이지 않게 새로 불러온다
+  const prev = globalThis.TP.train;
+  const realNow = Date.now;
+  delete require.cache[require.resolve('../public/js/train.js')];
+  require('../public/js/train.js');
+  const F = globalThis.TP.train;
+  let clock = 1_000_000;
+  Date.now = () => clock;
+  let calls = 0;
+  let reply = { stations: [SEOUL], incomplete: 1 };
+  globalThis.fetch = async () => { calls++; if (reply === 'fail') throw new Error('down'); return { ok: true, json: async () => reply }; };
+  try {
+    await F.load();
+    assert.equal(F.incomplete(), 1);
+    await F.load(); // 1분 전: 다시 받지 않는다
+    assert.equal(calls, 1);
+    clock += 61_000;
+    reply = 'fail';
+    await F.load(); // 다시 받기 실패: 받아 둔 표와 빠진 역 표시는 그대로, 실패한 것으로 보지 않는다
+    assert.equal(calls, 2);
+    assert.equal(F.incomplete(), 1);
+    assert.equal(F.loadFailed(), false);
+    assert.ok(F.stationOf({ name: '서울역' }));
+    clock += 61_000;
+    reply = { stations: [SEOUL, GIMCHEON] };
+    await F.load(); // 서버가 다 채웠다
+    assert.equal(calls, 3);
+    assert.equal(F.incomplete(), 0);
+    clock += 61_000;
+    await F.load(); // 완전한 표는 더 받지 않는다
+    assert.equal(calls, 3);
+  } finally {
+    Date.now = realNow;
+    globalThis.TP.train = prev;
+  }
+});

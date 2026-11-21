@@ -54,6 +54,9 @@
   let stations = null; // 불러온 역 목록
   let stationFail = null; // { t, message }
   let stationPromise = null;
+  let incomplete = 0; // 서버가 카카오 오류로 좌표를 아직 못 채운 역 수 (그 역은 추천·검색에 안 나온다)
+  let loadedAt = 0;
+  const INCOMPLETE_RETRY_MS = 60 * 1000;
   const memory = new Map(); // `${depId}|${arrId}|${ymd}` -> { trips } (trips 비어 있으면 조회 결과 없음)
   const failed = new Map(); // key -> { t, message }
   const pending = new Map(); // key -> Promise
@@ -77,19 +80,28 @@
   }
 
   function loadStations() {
-    if (stations) return Promise.resolve();
-    if (stationFail && Date.now() - stationFail.t < FAIL_TTL_MS) return Promise.resolve();
+    // 서버가 좌표를 다 못 채운 표(incomplete)를 줬으면 잠시 뒤 다시 받는다(서버가 뒤에서 채우는 중)
+    if (stations && !(incomplete && Date.now() - loadedAt >= INCOMPLETE_RETRY_MS)) return Promise.resolve();
+    if (!stations && stationFail && Date.now() - stationFail.t < FAIL_TTL_MS) return Promise.resolve();
     if (!stationPromise) {
       stationPromise = getJson('/api/train/stations')
         .then((j) => {
           stations = Array.isArray(j.stations) ? j.stations : [];
+          incomplete = Number.isInteger(j.incomplete) && j.incomplete > 0 ? j.incomplete : 0;
+          loadedAt = Date.now();
           stationFail = null;
         })
-        .catch((e) => { stationFail = { t: Date.now(), message: e.message }; })
+        .catch((e) => {
+          if (stations) loadedAt = Date.now(); // 다시 받기 실패: 받아 둔 표를 계속 쓰고 잠시 뒤 또 시도
+          else stationFail = { t: Date.now(), message: e.message };
+        })
         .finally(() => { stationPromise = null; });
     }
     return stationPromise;
   }
+
+  /** 역 목록을 못 받았는가 (서버 표 만들기 실패·네트워크 오류 등, 1분 동안 기억). 빈 추천·검색 결과를 '없음'이 아니라 오류로 보여 줄 때 쓴다 */
+  const loadFailed = () => !stations && Boolean(stationFail) && Date.now() - stationFail.t < FAIL_TTL_MS;
 
   /** 장소 -> TAGO 역: 좌표가 500m 안인 가장 가까운 역을 먼저, 없으면 이름으로 */
   function stationOf(place) {
@@ -194,5 +206,5 @@
     return counts;
   }
 
-  TP.train = { LOOKUP_DAYS, nearStations, searchStations, withTrains, countAll, load: loadStations, stationOf, lastLookupDate, inWindow, normName, matchStation, timeToMin, peek, get, key, ymdOf };
+  TP.train = { LOOKUP_DAYS, nearStations, searchStations, withTrains, countAll, load: loadStations, loadFailed, incomplete: () => (stations ? incomplete : 0), stationOf, lastLookupDate, inWindow, normName, matchStation, timeToMin, peek, get, key, ymdOf };
 })();
