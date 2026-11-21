@@ -627,7 +627,7 @@
       case 'station': return `'${lk.place}'을(를) 열차 역 목록에서 찾지 못했어요. 역 이름을 확인하거나 편을 직접 입력해 주세요`;
       case 'noresult': return '이 날 두 역 사이 열차가 조회되지 않아요. 편을 직접 입력해 주세요';
       case 'none-left': return '이후 출발하는 열차가 없어요. 다른 편을 고르거나 직접 입력해 주세요';
-      case 'error': return `열차 조회 실패: ${lk.message}. 편을 직접 입력해 주세요`;
+      case 'error': return `열차 조회 실패: ${String(lk.message || '').replace(/\.\s*$/, '')}. 편을 직접 입력해 주세요`; // 서버 문구 끝 마침표와 겹치지 않게
       default: return '';
     }
   }
@@ -647,7 +647,7 @@
     // 태그 DOM은 접힌 행과 펼친 카드 두 곳에 필요하므로 정의만 모아 두고 그릴 때마다 새로 만든다
     const tag = (cls, text, title, children) => tagDefs.push({ cls, text, title, children });
     const buildTags = () => tagDefs.map((t) => el('span', { class: 'tag' + (t.cls ? ' ' + t.cls : ''), title: t.title, text: t.text }, t.children));
-    if (leg.loading) tag('loading', null, null, [el('span', { class: 'spinner' }), ' 계산 중…']);
+    if (leg.loading) tag('loading', null, null, [el('span', { class: 'spinner' }), leg.mode === 'train' ? ' 열차 확인 중…' : ' 계산 중…']);
     else if (leg.estimated) {
       tag('warn', '추정(직선거리 기반)');
       notes.push('추정(직선거리 기반)');
@@ -815,7 +815,7 @@
             el('span', { class: 'grow' }),
             el('strong', { class: 'leg-sum-cost', text: legCostShort(leg) }),
             fr && !leg.override.cost ? el('span', { class: 'leg-sum-range', title: '요금 범위', text: '범위' }) : null,
-            leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), ' 계산 중…']) : null,
+            leg.loading ? el('span', { class: 'tag loading' }, [el('span', { class: 'spinner' }), leg.mode === 'train' ? ' 열차 확인 중…' : ' 계산 중…']) : null,
             ...[...marks].map(([label, why]) => el('span', { class: 'leg-warn ' + MARK_CLS[label], title: why, text: label })), // 자세한 사유는 마우스를 올리면 보인다
           ]),
           el('div', { class: 'leg-sum-sub' }, sumSub),
@@ -1566,6 +1566,7 @@
               // 열차: 이미 불러온 TAGO 역 목록에서 이름으로 찾는다 (외부 검색 없음)
               try { await TP.train.load(); } catch (_) { /* 빈 결과로 */ }
               found = TP.train.searchStations(place, q, 8);
+              if (seq === side.seq) side.searchFailed = TP.train.loadFailed(); // 역 목록을 못 받았으면 '결과 없음'이 아니라 오류
             } else {
               // 버스: 카카오 키워드 검색에서 고속·시외버스터미널로 분류된 곳만 ('<검색어> 터미널'도 함께 찾아 빠짐을 줄인다).
               // OSM으로 넘어가지 않는다(터미널 분류가 없어 결과가 늘 비고, 오류가 '결과 없음'으로 가려진다)
@@ -1606,7 +1607,7 @@
             paintHub(s);
             const all = await near;
             let recs = all;
-            let status = all.length ? 'ok' : 'nocity';
+            let status = all.length ? 'ok' : TP.train.loadFailed() ? 'loadfail' : 'nocity'; // 역 목록을 못 받은 것과 '20km 안에 없음'을 구분
             if (all.length && fixed && inWin) {
               const counts = await TP.train.countAll(all, fixed, s, ymd, 3);
               recs = TP.train.withTrains(all, counts);
@@ -1665,10 +1666,12 @@
     const note = side.status === 'period' ? el('p', { class: 'hub-empty', text: '열차 조회 기간(약 4주) 밖이라 열차가 있는지 확인하지 못했어요' })
       : side.status === 'error' ? el('p', { class: 'hub-empty', text: '열차 조회에 실패해 열차가 있는지 확인하지 못했어요. 잠시 후 다시 시도해 주세요' })
       : side.status === 'loadfail' ? el('p', { class: 'hub-empty', text: `${w} 목록을 불러오는 중 오류가 발생해 일부만 보여요(호출 한도·네트워크 등). 잠시 후 다시 시도해 주세요` }) : null;
-    recList.replaceChildren(...(nRecs ? [...(note ? [note] : []), ...side.recs.map(opt)] : [el('p', { class: 'hub-empty', text: msg || '' })]));
+    // 열차: 서버가 좌표를 다 못 채운 역 목록이면 빠진 역이 있을 수 있음을 추천·검색 양쪽에 알린다(그 역은 좌표가 없어 목록에 안 나온다)
+    const partialNote = () => (hubState.mode === 'train' && TP.train.incomplete() ? [el('p', { class: 'hub-empty', text: '역 목록 일부를 불러오는 중 오류가 발생해 빠진 역이 있을 수 있어요(호출 한도·네트워크 등). 잠시 후 다시 시도해 주세요' })] : []);
+    recList.replaceChildren(...partialNote(), ...(nRecs ? [...(note ? [note] : []), ...side.recs.map(opt)] : [el('p', { class: 'hub-empty', text: msg || '' })]));
     // 검색 오류는 '결과 없음'과 구분한다. 일부만 실패했으면 받은 결과는 보여 준다
     const searchErr = side.searchFailed && !side.pending ? '검색 중 오류가 발생했어요(호출 한도·네트워크 등). 잠시 후 다시 시도해 주세요' : '';
-    foundList.replaceChildren(...(q && !side.found.length
+    foundList.replaceChildren(...(q && !side.pending && q.length >= 2 ? partialNote() : []), ...(q && !side.found.length
       ? [el('p', { class: 'hub-empty', text: q.length < 2 ? '두 글자 이상 입력해 주세요' : side.pending ? '검색하는 중…' : searchErr || '검색 결과가 없어요' })]
       : [...(searchErr ? [el('p', { class: 'hub-empty', text: searchErr })] : []), ...side.found.map((r, i) => opt(r, nRecs + i))]));
   }

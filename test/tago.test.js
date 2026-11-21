@@ -208,6 +208,63 @@ test('stations: 카카오 키워드 검색으로 좌표를 붙인다 (기차역 
   assert.ok(seen.length >= 8 && seen.every((a) => a === 'KakaoAK kk'));
   assert.ok(calls.includes('판교 경기역'));
   assert.strictEqual((await t.stations('ip')).cache, 'HIT');
+  // 카카오 오류(부산: HTTP 500, 제주: 네트워크)는 '맞는 장소 없음'(일산)과 달리 빈 역 수로 알린다. 내부 기록은 내보내지 않는다
+  assert.strictEqual(r.body.incomplete, 2);
+  assert.ok(!('coordRetry' in r.body) && !('coordTriedAt' in r.body));
+});
+
+test('stations: 카카오 오류로 좌표가 빈 역만 10분 뒤 뒤에서 다시 채우고, TAGO는 다시 부르지 않으며 30일 만료는 그대로', async () => {
+  const TRAIN = '교통,수송 > 기차,철도 > 기차역 > KTX정차역';
+  let kakaoDown = true;
+  const kakaoCalls = [];
+  let tagoCalls = 0;
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    if (u.hostname === 'dapi.kakao.com') {
+      const q = u.searchParams.get('query');
+      kakaoCalls.push(q);
+      if (q.startsWith('부산') && kakaoDown) return { ok: false, status: 429, text: async () => '' };
+      const name = q.replace(/ 기차역$|역$/, '');
+      return resp({ documents: [{ place_name: `${name}역`, category_name: TRAIN, y: '35.1', x: '129.0' }] });
+    }
+    tagoCalls++;
+    if (u.pathname.endsWith('GetCtyCodeList')) return resp(ok([{ citycode: '11', cityname: '서울특별시' }]));
+    return resp(ok([{ nodeid: 'NAT000001', nodename: '서울' }, { nodeid: 'NAT000002', nodename: '부산' }]));
+  };
+  const db = memDb();
+  let clock = 1000;
+  const t = createTago({ db, env: { TP_TAGO_KEY: 'k', TP_KAKAO_REST_KEY: 'kk' }, fetchImpl, now: () => clock, queue: createQueue(0), retryWaitMs: [0, 0] });
+  const settle = () => new Promise((res) => setTimeout(res, 20)); // 뒤에서 도는 채우기를 기다린다
+  const coords = (r) => r.body.stations.map((s) => [s.name, s.lat]);
+
+  const r1 = await t.stations('ip');
+  assert.deepStrictEqual(coords(r1), [['서울', 35.1], ['부산', null]]);
+  assert.strictEqual(r1.body.incomplete, 1);
+  const tago1 = tagoCalls;
+
+  // 10분 전에는 다시 검색하지 않는다
+  kakaoDown = false;
+  kakaoCalls.length = 0;
+  clock += 9 * 60 * 1000;
+  assert.strictEqual((await t.stations('ip')).body.incomplete, 1);
+  await settle();
+  assert.deepStrictEqual(kakaoCalls, []);
+
+  // 10분이 지나면 이번 응답은 기다리지 않고 지금 표를 주고, 뒤에서 부산만 다시 검색한다
+  clock += 2 * 60 * 1000;
+  const r2 = await t.stations('ip');
+  assert.strictEqual(r2.body.incomplete, 1);
+  await settle();
+  assert.deepStrictEqual(kakaoCalls, ['부산역']);
+  assert.strictEqual(tagoCalls, tago1);
+  const r3 = await t.stations('ip');
+  assert.deepStrictEqual(coords(r3), [['서울', 35.1], ['부산', 35.1]]);
+  assert.ok(!('incomplete' in r3.body));
+  assert.strictEqual(r3.cache, 'HIT');
+
+  // 처음 만든 시각 기준 30일이 지나면 표를 새로 만든다(채우기가 만료를 늦추지 않는다)
+  clock = 1000 + 30 * 24 * 60 * 60 * 1000;
+  assert.strictEqual((await t.stations('ip')).cache, 'MISS');
 });
 
 test('pickStation: 시·도 대조, 이름 포함, 앞 두 글자 대체, 다른 역 이름 거부, 폐역은 뒤로', () => {

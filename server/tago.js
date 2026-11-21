@@ -18,6 +18,7 @@ const PREFIX = 'tago-v5|'; // v5: 역 좌표 대조 규칙 변경(시·도 대�
 const STATIONS_KEY = `${PREFIX}stations`;
 const KAKAO_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
 const KAKAO_CONCURRENCY = 5;
+const COORD_RETRY_MS = 10 * 60 * 1000; // 카카오 오류로 좌표가 빈 역을 다시 검색하는 간격
 const ID_RE = /^NAT[0-9A-Z]{5,9}$/;
 const DEFAULT_MIN_INTERVAL_MS = 350;
 const DEFAULT_RETRY_WAIT_MS = [1500, 3000]; // 초당 한도(429/코드 22·23) 재시도 대기
@@ -297,8 +298,9 @@ function createTago(opts) {
       }
     });
     if (!stations.length) throw new TagoError(502, MSG.upstream);
-    await attachCoords(stations);
-    return { stations };
+    const failedIds = await attachCoords(stations);
+    // 카카오 오류로 좌표를 못 붙인 역은 표와 함께 기록해 두고 나중에 그 역만 다시 채운다(refillCoords)
+    return failedIds.length ? { stations, coordRetry: failedIds, coordTriedAt: now() } : { stations };
   }
 
   async function kakaoSearch(query, name, city, others) {
@@ -306,30 +308,58 @@ function createTago(opts) {
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
       const res = await doFetch(`${KAKAO_URL}?query=${encodeURIComponent(query)}`, { headers: { Authorization: `KakaoAK ${kakaoKey}` }, signal: ctrl.signal });
-      if (!res.ok) return null;
+      if (!res.ok) throw new Error(`kakao ${res.status}`); // 한도 초과·서버 오류는 '맞는 장소 없음'(null)과 구분한다
       return pickStation((JSON.parse(await res.text()) || {}).documents, name, city, others);
     } finally { clearTimeout(timer); }
   }
 
-  /** 카카오 REST 키워드 검색으로 역마다 좌표를 붙인다(TAGO는 좌표가 없다). 키가 없거나 실패하면 그 역은 null */
-  async function attachCoords(stations) {
-    for (const s of stations) { s.lat = null; s.lon = null; }
-    if (!kakaoKey) return;
-    const others = new Set(stations.flatMap((s) => nameKeys(s.name)));
+  /** 카카오 REST 키워드 검색으로 역마다 좌표를 붙인다(TAGO는 좌표가 없다). 맞는 장소가 없으면 그 역은 null.
+   *  targets: 좌표를 붙일 역(기본 전체), all: 다른 역 이름 거르기(pickStation ③)에 쓰는 전체 목록.
+   *  반환: 카카오 오류(한도 초과·서버 오류·네트워크)로 끝난 역의 id 목록 — 다시 검색하면 채워질 수 있는 역 */
+  async function attachCoords(all, targets = all) {
+    for (const s of targets) { s.lat = null; s.lon = null; }
+    if (!kakaoKey) return [];
+    const others = new Set(all.flatMap((s) => nameKeys(s.name)));
+    const failed = [];
     let next = 0;
     const worker = async () => {
-      while (next < stations.length) {
-        const s = stations[next++];
+      while (next < targets.length) {
+        const s = targets[next++];
         try {
           const q0 = searchName(s.name);
           for (const q of [`${q0}역`, `${q0} 기차역`]) { // 첫 검색에서 못 찾으면 한 번 더
             const found = await kakaoSearch(q, s.name, s.city, others);
             if (found) { s.lat = found.lat; s.lon = found.lon; break; }
           }
-        } catch (e) { /* 이 역은 좌표 없음 */ }
+        } catch (e) {
+          failed.push(s.id); // 이 역은 좌표 없음 — 나중에 다시 시도
+        }
       }
     };
     await Promise.all(Array.from({ length: KAKAO_CONCURRENCY }, worker));
+    return failed;
+  }
+
+  /** 표를 만들 때 카카오 오류로 좌표가 빈 역만 다시 검색해 표를 채운다(TAGO는 다시 부르지 않는다).
+   *  마지막 시도 후 COORD_RETRY_MS가 지났을 때만, 한 번에 하나만 돈다. 표를 처음 만든 시각(created_at)은 그대로 둬 30일 만료가 늦춰지지 않는다 */
+  let refilling = null;
+  function refillCoords() {
+    if (refilling) return refilling;
+    const row = db.getTransit(STATIONS_KEY);
+    let body;
+    try { body = row && JSON.parse(row.json); } catch (e) { return null; }
+    const pending = body && Array.isArray(body.coordRetry) ? body.coordRetry : [];
+    if (!pending.length || now() - (body.coordTriedAt || row.created_at) < COORD_RETRY_MS) return null;
+    const targets = body.stations.filter((s) => pending.includes(s.id));
+    refilling = attachCoords(body.stations, targets)
+      .then((failedIds) => {
+        const next = { stations: body.stations };
+        if (failedIds.length) Object.assign(next, { coordRetry: failedIds, coordTriedAt: now() });
+        db.putTransit(STATIONS_KEY, JSON.stringify(next), row.created_at);
+      })
+      .catch(() => { /* 다음 요청 때 다시 시도 */ })
+      .finally(() => { refilling = null; });
+    return refilling;
   }
 
   /** 캐시 -> 진행 중 요청 공유 -> 호출 제한 -> 업스트림 호출 -> 캐시 저장 */
@@ -354,7 +384,15 @@ function createTago(opts) {
     return run;
   }
 
-  const stations = (ip) => cached(STATIONS_KEY, ip, fetchStations);
+  /** 역 목록. 카카오 오류로 좌표가 빈 역이 있으면 표는 바로 주고(기다리지 않음) 그 역만 뒤에서 다시 채우며,
+   *  응답에 incomplete(빈 역 수)를 넣어 화면이 '빠진 역이 있을 수 있음'을 알리게 한다. 내부 기록(coordRetry 등)은 내보내지 않는다 */
+  async function stations(ip) {
+    const r = await cached(STATIONS_KEY, ip, fetchStations);
+    if (r.status !== 200 || !r.body || !Array.isArray(r.body.coordRetry)) return r;
+    refillCoords(); // 기다리지 않는다
+    const { coordRetry, coordTriedAt, ...body } = r.body;
+    return { ...r, body: { ...body, incomplete: coordRetry.length } };
+  }
 
   async function trips(query, ip) {
     const q = query || {};
