@@ -517,7 +517,7 @@
   /** 장소 사이의 이동 구간: 타임라인 위의 가벼운 연결 행. 접으면 한 줄(이동수단·시간·비용)만 남는다. */
   const FALLBACK_HINT = '시간은 자동차 기준으로 계산했고, 요금은 직접 입력해 주세요';
   const nearWalkHint = (leg) => `거리가 가까워요(직선 ${(TP.routing.haversine(leg.from, leg.to) / 1000).toFixed(1)}km). 이동수단을 도보로 바꾸면 더 정확할 수 있어요`;
-  const NOROUTE_HINT = '카카오가 대중교통 경로를 찾지 못했어요. ' + FALLBACK_HINT + '. 열차나 버스를 선택하면 경로를 조회할 수 있어요';
+  const NOROUTE_HINT = '카카오가 대중교통 경로를 찾지 못했어요. ' + FALLBACK_HINT + '. 도시 간 이동처럼 먼 구간은 대중교통으로 조회되지 않아요. 이동수단을 열차로 바꾸는 것을 추천해요';
   const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요. 출발지와 도착지가 멀면 이동수단을 열차·버스로 바꿔 조회하거나, 경유지를 추가해 경로를 나눠 보세요';
   const NOSERVICE_HINT = '편(출발·도착 시각)을 입력하면 그 시간으로 계산해요. 출발·도착 시각을 입력해 주세요. 입력하기 전에는 시간과 요금을 계산하지 않아요';
   const HUB_NOFARE_HINT = '요금을 알면 직접 입력해 주세요 (일반 성인 1인 요금 기준). 입력하지 않으면 합계에서 빼요';
@@ -924,7 +924,7 @@
       el('h4', { text: '일차별 합계' }),
       el('div', { class: 'day-rows' }, dayRows),
       ...(t.unknownCostLegs ? [el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(t.unknownCostLegs)} (이동 구간의 직접 입력으로 채울 수 있어요)`])] : []),
-      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)입니다. 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 두어 합계에서 제외해요. 두 장소가 가까우면(직선 2km 이하) 도보로 바꿔 보라고 안내해요. 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 서울 중형택시 기준 추정치에 통행료를 더한 값입니다. 택시·자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다. 열차·버스(고속·시외)는 편을 직접 입력하거나 조회한 편 기준이고, 요금은 일반 성인 기준이라 실제와 다를 수 있습니다. 편을 입력하지 않으면 시간은 계산하지 않고(시간 미정) 요금은 미정으로 두어 합계에서 제외해요. ' + `열차 시간표·요금은 ${lookupLimitText()}까지만 조회돼요.` })
+      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)입니다. 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 두어 합계에서 제외해요. 두 장소가 가까우면(직선 2km 이하) 도보로 바꿔 보라고 안내해요. 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 서울 중형택시 기준 추정치에 통행료를 더한 값입니다. 택시·자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다. 열차는 편을 직접 입력하거나 조회한 편 기준이고, 버스(고속·시외)는 시간표를 조회하지 않으니 예매한 편을 직접 입력해 주세요. 요금은 일반 성인 기준이라 실제와 다를 수 있습니다. 편을 입력하지 않으면 시간은 계산하지 않고(시간 미정) 요금은 미정으로 두어 합계에서 제외해요. ' + `열차 시간표·요금은 ${lookupLimitText()}까지만 조회돼요.` })
     );
   }
 
@@ -1556,6 +1556,7 @@
           const q = e.target.value.trim();
           const seq = ++side.seq;
           side.found = [];
+          side.searchFailed = false;
           side.pending = q.length >= 2;
           if (q.length < 2) return paintHub(s);
           paintHub(s);
@@ -1566,10 +1567,12 @@
               try { await TP.train.load(); } catch (_) { /* 빈 결과로 */ }
               found = TP.train.searchStations(place, q, 8);
             } else {
-              // 버스: 카카오 키워드 검색에서 고속·시외버스터미널로 분류된 곳만 ('<검색어> 터미널'도 함께 찾아 빠짐을 줄인다)
-              const lists = await Promise.all([q, `${q} 터미널`].map((k) => TP.geocode.search(k).catch(() => [])));
+              // 버스: 카카오 키워드 검색에서 고속·시외버스터미널로 분류된 곳만 ('<검색어> 터미널'도 함께 찾아 빠짐을 줄인다).
+              // OSM으로 넘어가지 않는다(터미널 분류가 없어 결과가 늘 비고, 오류가 '결과 없음'으로 가려진다)
+              const res = await Promise.all([q, `${q} 터미널`].map((k) => TP.geocode.searchKakaoOnly(k)));
+              if (seq === side.seq) side.searchFailed = res.some((r) => r.failed);
               const seen = new Set();
-              found = lists.flat().filter((r) => {
+              found = res.flatMap((r) => r.list).filter((r) => {
                 const id = `${r.name}|${r.lat}|${r.lon}`;
                 if (r.hub !== mode || seen.has(id)) return false;
                 seen.add(id);
@@ -1617,8 +1620,8 @@
           };
           Promise.resolve().then(side.refresh); // 칸이 화면에 붙은 뒤 그린다
         } else {
-          TP.geocode.nearbyHubs(place, mode).then((list) => {
-            if (hubState && hubState.sides[s] === side) { side.recs = list.slice(0, HUB_REC_MAX); side.status = 'ok'; paintHub(s); }
+          TP.geocode.nearbyHubs(place, mode).then(({ list, failed }) => {
+            if (hubState && hubState.sides[s] === side) { side.recs = list.slice(0, HUB_REC_MAX); side.status = failed ? 'loadfail' : list.length ? 'ok' : 'nocity'; paintHub(s); } // 조회 오류와 '정말 없음'을 구분한다
           });
         }
         return box;
@@ -1655,13 +1658,19 @@
       loading: hubState.mode === 'train' ? `${w}을 찾고 열차가 있는지 확인하는 중…` : '가까운 곳을 찾는 중…',
       wait: '출발역을 먼저 골라 주세요',
       none: '이 날 조회된 열차가 없어요. 역 이름으로 검색해 주세요',
-      nocity: `20km 안에 열차${w}이 없어요. ${w} 이름으로 검색해 주세요`,
+      nocity: `20km 안에 ${hubState.mode === 'bus' ? '버스' : '열차'}${w}이 없어요. ${w} 이름으로 검색해 주세요`,
       ok: `근처에서 조회할 수 있는 ${w}을 찾지 못했어요. 위에서 검색해 주세요.`,
+      loadfail: `${w} 목록을 불러오는 중 오류가 발생했어요(호출 한도·네트워크 등). 잠시 후 다시 시도해 주세요`,
     }[side.status];
     const note = side.status === 'period' ? el('p', { class: 'hub-empty', text: '열차 조회 기간(약 4주) 밖이라 열차가 있는지 확인하지 못했어요' })
-      : side.status === 'error' ? el('p', { class: 'hub-empty', text: '열차 조회에 실패해 열차가 있는지 확인하지 못했어요. 잠시 후 다시 시도해 주세요' }) : null;
+      : side.status === 'error' ? el('p', { class: 'hub-empty', text: '열차 조회에 실패해 열차가 있는지 확인하지 못했어요. 잠시 후 다시 시도해 주세요' })
+      : side.status === 'loadfail' ? el('p', { class: 'hub-empty', text: `${w} 목록을 불러오는 중 오류가 발생해 일부만 보여요(호출 한도·네트워크 등). 잠시 후 다시 시도해 주세요` }) : null;
     recList.replaceChildren(...(nRecs ? [...(note ? [note] : []), ...side.recs.map(opt)] : [el('p', { class: 'hub-empty', text: msg || '' })]));
-    foundList.replaceChildren(...(q && !side.found.length ? [el('p', { class: 'hub-empty', text: q.length < 2 ? '두 글자 이상 입력해 주세요' : side.pending ? '검색하는 중…' : '검색 결과가 없어요' })] : side.found.map((r, i) => opt(r, nRecs + i))));
+    // 검색 오류는 '결과 없음'과 구분한다. 일부만 실패했으면 받은 결과는 보여 준다
+    const searchErr = side.searchFailed && !side.pending ? '검색 중 오류가 발생했어요(호출 한도·네트워크 등). 잠시 후 다시 시도해 주세요' : '';
+    foundList.replaceChildren(...(q && !side.found.length
+      ? [el('p', { class: 'hub-empty', text: q.length < 2 ? '두 글자 이상 입력해 주세요' : side.pending ? '검색하는 중…' : searchErr || '검색 결과가 없어요' })]
+      : [...(searchErr ? [el('p', { class: 'hub-empty', text: searchErr })] : []), ...side.found.map((r, i) => opt(r, nRecs + i))]));
   }
 
   function submitHub() {

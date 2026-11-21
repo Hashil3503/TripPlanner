@@ -184,7 +184,7 @@
 
   /** item -> next 구간이 열차·버스면 { anchor, extra }: 닻과 그 구간 계산에 넘길 조회 결과. arrive/stay는 item 도착 분·최소 체류 */
   // ---- 역·터미널: 열차·버스 구간은 역 -> 역 (결정 8) ----
-  /** 장소가 'train'(기차역) | 'bus'(버스터미널) | null. shortcut: 버스는 이름 패턴만 본다 (TAGO 터미널 ID 매칭은 TP-018-2) */
+  /** 장소가 'train'(기차역) | 'bus'(버스터미널) | null. shortcut: 버스는 이름 패턴만 본다 */
   function hubOf(item) {
     if (!item) return null;
     if (item.hub) return item.hub;
