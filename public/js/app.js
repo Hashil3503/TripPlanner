@@ -1027,6 +1027,7 @@
     const legEl = document.querySelector(`#itemList .leg[data-key="${CSS.escape(key)}"]`);
     if (!legEl) return;
     if ($('#sideLeft').classList.contains('is-collapsed')) $('#toggleLeft').click(); // 접힌 일정 사이드바는 펼친다
+    if (UI.mobileSheet) UI.mobileSheet.open('schedule'); // 모바일 하단 시트가 접혀 있거나 요약 탭이면 일정 탭을 연다
     if (legEl.dataset.collapsed === 'true') toggleLeg(legEl);
     setFocusedLeg(key, dayIndex);
     legEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -2357,12 +2358,11 @@
 
     $('#itemCat').replaceChildren(...TP.CATEGORIES.map((c) => el('option', { value: c.id, text: c.label })));
 
-    // 스크롤하면 고정된 검색 바 아래에 그림자 (데스크톱은 패널이, 모바일은 .layout이 스크롤된다)
+    // 스크롤하면 고정된 검색 바 아래에 그림자 (데스크톱·모바일 모두 패널 자체가 스크롤된다)
     const panel = $('#panel');
     const searchBar = $('#searchBar');
-    const onScroll = () => searchBar.classList.toggle('scrolled', panel.scrollTop > 4 || panel.getBoundingClientRect().top < searchBar.getBoundingClientRect().top - 4);
+    const onScroll = () => searchBar.classList.toggle('scrolled', panel.scrollTop > 4);
     panel.addEventListener('scroll', onScroll, { passive: true });
-    $('.layout').addEventListener('scroll', onScroll, { passive: true });
   }
 
   function initSortable() {

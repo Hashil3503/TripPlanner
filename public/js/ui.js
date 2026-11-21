@@ -300,11 +300,214 @@
     });
   }
 
+  // =====================================================================
+  // 모바일 하단 시트 (<=767px): 일정/요약 탭 전환 + 드래그 높이 조절 + 스냅(닫힘/50%/88%)
+  // =====================================================================
+  const mobileMq = window.matchMedia ? window.matchMedia('(max-width: 767px)') : null;
+
+  /** 드래그 종료 시 최종 시트 높이(px) 계산.
+   * 빠른 플릭(|v| >= 0.45 px/ms)은 닫힘/중간(50%)/최대(88%) 단계로 이동하고,
+   * 느린 드래그는 닫힘·중간·최대 근처에서만 자석 스냅하며 나머지는 자유 높이를 유지한다. */
+  function snapSheetHeight(heightPx, containerH, barH, velocity = 0) {
+    const minH = Math.max(40, Math.round(barH || 54));
+    const maxH = Math.max(minH, Math.round(containerH * 0.92));
+    const midH = Math.max(minH, Math.round(containerH * 0.5));
+    const fullH = Math.max(midH, Math.round(containerH * 0.88));
+    const clamped = Math.min(maxH, Math.max(minH, Math.round(heightPx)));
+    if (Math.abs(velocity) >= 0.45) {
+      if (velocity > 0) return clamped > midH ? midH : minH; // 아래로 플릭
+      return clamped < midH ? midH : fullH; // 위로 플릭
+    }
+    if (clamped <= minH + 40) return minH;
+    if (clamped >= containerH * 0.82) return fullH;
+    if (Math.abs(clamped - midH) <= 28) return midH;
+    return clamped;
+  }
+
+  let mobileSheetApi = null;
+
+  function initMobileSheet() {
+    const $ = (id) => document.getElementById(id);
+    const sheet = $('mobileSheet');
+    const chrome = $('sheetChrome');
+    const handle = $('sheetHandle');
+    const toggle = $('sheetToggle');
+    const layout = $('tripView');
+    if (!sheet || !chrome || !toggle || !layout) return null;
+    const tabs = Array.from(sheet.querySelectorAll('[data-sheet-tab]'));
+
+    const isMobile = () => !!(mobileMq && mobileMq.matches);
+    const barH = () => Math.round(chrome.getBoundingClientRect().height) || 54;
+    const layoutH = () => Math.round(layout.getBoundingClientRect().height) || window.innerHeight - 56;
+
+    let collapsed = false;
+    let lastOpenRatio = 0.5;
+    let currentH = null; // px (null이면 CSS 기본 50%)
+
+    function applyHeight(px, isClosed) {
+      collapsed = !!isClosed;
+      const bH = barH();
+      sheet.style.setProperty('--sheet-bar-h', bH + 'px');
+      if (collapsed) {
+        currentH = bH;
+        sheet.style.setProperty('--sheet-h', bH + 'px');
+      } else {
+        const lH = layoutH();
+        const clamped = Math.min(Math.round(lH * 0.92), Math.max(bH + 48, Math.round(px)));
+        currentH = clamped;
+        lastOpenRatio = Math.min(0.88, Math.max(0.25, clamped / Math.max(1, lH)));
+        sheet.style.setProperty('--sheet-h', clamped + 'px');
+      }
+      sheet.classList.toggle('is-collapsed', collapsed);
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      const label = collapsed ? '하단 패널 펼치기' : '하단 패널 접기';
+      toggle.setAttribute('aria-label', label);
+      toggle.title = collapsed ? '펼치기' : '접기';
+    }
+
+    function setTab(tab) {
+      const next = tab === 'summary' ? 'summary' : 'schedule';
+      sheet.dataset.tab = next;
+      for (const b of tabs) b.setAttribute('aria-selected', String(b.dataset.sheetTab === next));
+    }
+
+    function open(tab) {
+      if (tab) setTab(tab);
+      if (!isMobile()) return;
+      if (collapsed || currentH == null) applyHeight(layoutH() * lastOpenRatio, false);
+    }
+
+    function close() {
+      if (!isMobile()) return;
+      applyHeight(barH(), true);
+    }
+
+    for (const b of tabs) {
+      b.addEventListener('click', () => {
+        if (dragged) return;
+        const target = b.dataset.sheetTab;
+        setTab(target);
+        if (collapsed) applyHeight(layoutH() * lastOpenRatio, false);
+      });
+    }
+
+    toggle.addEventListener('click', () => {
+      if (dragged) return;
+      if (collapsed) applyHeight(layoutH() * lastOpenRatio, false);
+      else applyHeight(barH(), true);
+    });
+
+    // 키보드 조작 (핸들에 포커스 시 위/아래 화살표로 닫힘·50%·88% 이동)
+    if (handle) {
+      handle.addEventListener('keydown', (e) => {
+        if (!isMobile()) return;
+        const lH = layoutH();
+        const bH = barH();
+        const mid = Math.round(lH * 0.5);
+        const full = Math.round(lH * 0.88);
+        const cur = collapsed ? bH : currentH != null ? currentH : mid;
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          applyHeight(cur < mid - 10 ? mid : full, false);
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (cur > mid + 10) applyHeight(mid, false);
+          else applyHeight(bH, true);
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          applyHeight(full, false);
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          applyHeight(bH, true);
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (collapsed) applyHeight(lH * lastOpenRatio, false);
+          else applyHeight(bH, true);
+        }
+      });
+    }
+
+    // 포인터 드래그로 높이 조절 (탭·버튼 탭 클릭을 방해하지 않게 6px 이상 움직였을 때만 드래그 시작)
+    let pointerId = null;
+    let startY = 0;
+    let startH = 0;
+    let lastY = 0;
+    let lastT = 0;
+    let velocity = 0;
+    let dragging = false;
+    let dragged = false;
+
+    chrome.addEventListener('pointerdown', (e) => {
+      if (!isMobile() || e.button > 0) return;
+      pointerId = e.pointerId;
+      startY = lastY = e.clientY;
+      startH = Math.round(sheet.getBoundingClientRect().height);
+      lastT = e.timeStamp || performance.now();
+      velocity = 0;
+      dragging = false;
+      dragged = false;
+    });
+
+    chrome.addEventListener('pointermove', (e) => {
+      if (pointerId !== e.pointerId) return;
+      const dy = e.clientY - startY;
+      if (!dragging) {
+        if (Math.abs(dy) < 6) return;
+        dragging = true;
+        dragged = true;
+        sheet.classList.add('is-dragging');
+        try { chrome.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+      }
+      const now = e.timeStamp || performance.now();
+      const dt = now - lastT;
+      if (dt > 0) velocity = (e.clientY - lastY) / dt;
+      lastY = e.clientY;
+      lastT = now;
+      const bH = barH();
+      const maxH = Math.round(layoutH() * 0.92);
+      const nextH = Math.min(maxH, Math.max(bH, startH - dy));
+      sheet.style.setProperty('--sheet-h', nextH + 'px');
+      sheet.classList.toggle('is-collapsed', nextH <= bH + 4);
+    });
+
+    function finishDrag(e) {
+      if (pointerId !== e.pointerId) return;
+      pointerId = null;
+      if (!dragging) return;
+      dragging = false;
+      sheet.classList.remove('is-dragging');
+      try { if (chrome.hasPointerCapture(e.pointerId)) chrome.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+      const bH = barH();
+      const lH = layoutH();
+      const curH = Math.round(sheet.getBoundingClientRect().height);
+      const snapped = snapSheetHeight(curH, lH, bH, velocity);
+      applyHeight(snapped, snapped <= bH);
+      setTimeout(() => { dragged = false; }, 0);
+    }
+
+    chrome.addEventListener('pointerup', finishDrag);
+    chrome.addEventListener('pointercancel', finishDrag);
+
+    window.addEventListener('resize', () => {
+      if (!isMobile()) {
+        sheet.style.removeProperty('--sheet-h');
+        sheet.style.removeProperty('--sheet-bar-h');
+        return;
+      }
+      if (collapsed) applyHeight(barH(), true);
+      else if (currentH != null) applyHeight(layoutH() * lastOpenRatio, false);
+    });
+
+    return { open, close, setTab, isMobile };
+  }
+
   function initSidebars() {
     const $ = (id) => document.getElementById(id);
     sidebar($('sideLeft'), $('toggleLeft'), { key: 'tripplanner.ui.left', side: 'left', label: '일정' });
     sidebar($('sideRight'), $('toggleRight'), { key: 'tripplanner.ui.right', side: 'right', label: '요약', defaultCollapsed: () => !!(narrow && narrow.matches) });
+    mobileSheetApi = initMobileSheet();
+    TP.ui.mobileSheet = mobileSheetApi;
   }
 
-  TP.ui = { initSidebars, icon, modeIcon, catIcon, inkOn, routePills, menu, closeMenus: () => closeAll(), MODE_ICON, CAT_ICON };
+  TP.ui = { initSidebars, snapSheetHeight, mobileSheet: null, icon, modeIcon, catIcon, inkOn, routePills, menu, closeMenus: () => closeAll(), MODE_ICON, CAT_ICON };
 })();

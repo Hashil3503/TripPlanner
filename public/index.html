@@ -203,10 +203,28 @@
     </div>
   </main>
 
-  <!-- 여행 화면: 지도 + 일정/요약 사이드바 -->
+  <!-- 여행 화면: 지도 + 일정/요약 사이드바 (모바일에서는 하단 시트 탭으로 통합) -->
   <main class="layout" id="tripView" hidden>
     <h2 class="sr-only" id="tripHeading" tabindex="-1"></h2>
-    <div class="side side-left" id="sideLeft">
+    <div class="map-wrap">
+      <div id="map" aria-label="지도"></div>
+    </div>
+
+    <div class="sheet" id="mobileSheet" data-tab="schedule">
+      <div class="sheet-chrome" id="sheetChrome">
+        <div class="sheet-handle" id="sheetHandle" role="separator" aria-orientation="horizontal" aria-label="하단 패널 높이 조절" tabindex="0">
+          <span class="sheet-grip" aria-hidden="true"></span>
+        </div>
+        <div class="sheet-tabs" role="tablist" aria-label="패널 전환">
+          <button type="button" class="sheet-tab" id="sheetTabSchedule" role="tab" aria-selected="true" aria-controls="panel" data-sheet-tab="schedule">일정</button>
+          <button type="button" class="sheet-tab" id="sheetTabSummary" role="tab" aria-selected="false" aria-controls="summaryPanel" data-sheet-tab="summary">요약</button>
+          <button type="button" class="sheet-toggle" id="sheetToggle" aria-expanded="true" aria-label="하단 패널 접기" title="접기">
+            <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="side side-left" id="sideLeft">
     <aside class="panel" id="panel" aria-label="일정">
       <section class="search" id="searchBar" aria-label="장소 검색">
         <div class="search-box">
@@ -260,16 +278,13 @@
     <button class="side-toggle" id="toggleLeft" type="button" aria-controls="panel" aria-expanded="true" aria-label="일정 접기" title="일정 접기"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
     </div>
 
-    <div class="map-wrap">
-      <div id="map" aria-label="지도"></div>
-    </div>
-
     <div class="side side-right" id="sideRight">
     <aside class="panel summary-panel" id="summaryPanel" aria-label="요약">
       <section class="summary" id="daySummary" aria-label="하루 요약"></section>
       <section class="summary" id="tripSummary" aria-label="여행 전체 요약"></section>
     </aside>
     <button class="side-toggle" id="toggleRight" type="button" aria-controls="summaryPanel" aria-expanded="true" aria-label="요약 접기" title="요약 접기"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+    </div>
     </div>
   </main>
 
