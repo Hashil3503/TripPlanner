@@ -82,13 +82,14 @@
     return roundTo((distKm / c.efficiency) * c.fuelPrice, 10);
   }
 
-  // shortcut: 도로 이름/번호로 고속도로를 판별해 민자고속도로·개방식 요금·무료 구간은 구분하지 못한다. 정확도가 필요하면 통행료를 주는 길찾기 API로 교체
+  // shortcut: 도로 이름으로 고속도로를 판별해 민자고속도로·개방식 요금·무료 구간은 구분하지 못하고, OSM에서 이름이 빠진 고속도로 구간은 놓친다. 유료도로 표시를 주는 엔진으로 바꾸면 해소(TP-030-2)
+  // 번호(ref)만으로는 고속도로와 국도를 구분할 수 없어 쓰지 않는다 (예: 광주 시내 국도 1호선이 이름 없이 ref=1로 와 통행료가 붙었다)
   function tollRoadKm(steps) {
     if (!Array.isArray(steps)) return 0;
     let meters = 0;
     for (const s of steps) {
       if (!s || typeof s !== 'object') continue;
-      if ((typeof s.name === 'string' && s.name.includes('고속도로')) || (!s.name && s.ref)) meters += Math.max(0, s.distance || 0);
+      if (typeof s.name === 'string' && s.name.includes('고속도로')) meters += Math.max(0, s.distance || 0);
     }
     return meters / 1000;
   }

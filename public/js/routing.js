@@ -134,8 +134,9 @@
         if (e) memory.set(k, e);
       } else if (isFinite(v.d) && isFinite(v.t) && Array.isArray(v.g)) {
         if (k.startsWith('car|')) {
-          if (!isFinite(v.k)) continue; // 통행료 정보가 없는 예전 항목은 버리고 다시 조회
-          memory.set(k, { distance: v.d, duration: v.t, geometry: v.g, estimated: false, tollKm: v.k });
+          // 통행료 정보가 없거나 옛 판별 규칙(이름 없이 번호만 있는 구간도 고속도로, 2026-11-21 폐기)으로 저장한 항목(k)은 버리고 다시 조회. 지금 규칙은 k2
+          if (!isFinite(v.k2)) continue;
+          memory.set(k, { distance: v.d, duration: v.t, geometry: v.g, estimated: false, tollKm: v.k2 });
         } else {
           memory.set(k, { distance: v.d, duration: v.t, geometry: v.g, estimated: false });
         }
@@ -154,7 +155,7 @@
       const parts = [];
       let total = 2;
       for (const [k, v] of memory) {
-        const val = JSON.stringify(v.transit ? { x: { u: v.transit.landingURL, r: v.transit.routes } } : typeof v.tollKm === 'number' && isFinite(v.tollKm) ? { d: v.distance, t: v.duration, g: v.geometry, k: v.tollKm } : { d: v.distance, t: v.duration, g: v.geometry });
+        const val = JSON.stringify(v.transit ? { x: { u: v.transit.landingURL, r: v.transit.routes } } : typeof v.tollKm === 'number' && isFinite(v.tollKm) ? { d: v.distance, t: v.duration, g: v.geometry, k2: v.tollKm } : { d: v.distance, t: v.duration, g: v.geometry });
         parts.push([k, val]);
         total += k.length + val.length + 4;
       }

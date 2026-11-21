@@ -4,14 +4,14 @@ const assert = require('node:assert/strict');
 
 const fare = require('../public/js/fare.js');
 
-test('tollRoadKm: 이름에 고속도로가 있거나 이름 없이 번호만 있는 구간을 합산', () => {
+test('tollRoadKm: 이름에 고속도로가 있는 구간만 합산 (이름 없이 번호만 있는 국도는 세지 않는다)', () => {
   const steps = [
     { name: '경부고속도로', ref: '1', distance: 100000 },
-    { name: '', ref: '55', distance: 50000 },
+    { name: '', ref: '1', distance: 1479 }, // 광주 시내 국도 1호선: OSM에 이름 태그가 빠져 번호만 온다
     { name: '만덕대로', ref: '14', distance: 3000 },
     { name: '', ref: '', distance: 2000 },
   ];
-  assert.equal(fare.tollRoadKm(steps), 150);
+  assert.equal(fare.tollRoadKm(steps), 100);
   assert.equal(fare.tollRoadKm(null), 0);
 });
 
