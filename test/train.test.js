@@ -93,10 +93,13 @@ test('nearStations·stationOf: 역 목록 불러오기', async () => {
   assert.equal(T.stationOf({ name: '없는역', lat: 33.5, lon: 126.5 }), null);
 });
 
-test('withTrains: 열차가 1편 이상인 후보만 원래 순서(가까운 순) 그대로', () => {
+test('withTrains: 열차가 1편 이상이거나 조회에 실패한 후보, 원래 순서(가까운 순) 그대로', () => {
   const cands = [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }];
-  assert.deepEqual(T.withTrains(cands, [3, 0, null, 26]).map((c) => [c.name, c.count]), [['A', 3], ['D', 26]]);
-  assert.deepEqual(T.withTrains(cands, [0, 0, null, 0]), []);
+  const err = { error: 'TAGO 열차 API 호출 한도를 초과했어요. 잠시 후 다시 시도해 주세요.' };
+  // 조회 실패(C)는 '열차 없음'이 아니므로 빼지 않는다
+  assert.deepEqual(T.withTrains(cands, [3, 0, err, 26]).map((c) => [c.name, c.count]), [['A', 3], ['C', err], ['D', 26]]);
+  assert.deepEqual(T.withTrains(cands, [0, 0, 0, 0]), []);
+  assert.deepEqual(T.withTrains(cands, [0, null, 0, 0]), []); // 아직 조회 안 함(null)은 빼는 그대로
 });
 
 test('searchStations: 이름 포함 검색, 좌표 필수, 가까운 순, 개수 제한', () => {

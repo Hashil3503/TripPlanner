@@ -117,6 +117,8 @@ test('오류 매핑: 본문 오류 코드, XML 오류, HTTP 오류, 네트워크
   const xml = (code) => `<OpenAPI_ServiceResponse><cmmMsgHeader><errMsg>SERVICE ERROR</errMsg><returnReasonCode>${code}</returnReasonCode><returnAuthMsg>secretkey</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>`;
   const cases = [
     [() => resp(hdr('22')), 429],
+    [() => resp(hdr('23')), 429], // 초당 한도
+    [() => resp(xml('23')), 429],
     [() => resp(hdr('30')), 502],
     [() => resp(hdr('99')), 502],
     [() => resp(xml('30')), 502],
