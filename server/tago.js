@@ -136,7 +136,7 @@ function pickStation(docs, name, city, others) {
   return best ? { lat: parseFloat(best.y), lon: parseFloat(best.x) } : null;
 }
 
-/** TAGO 오류 코드/본문 -> TagoError. 알 수 없는 오류는 502 (열차·버스가 메시지만 바꿔 쓴다) */
+/** TAGO 오류 코드/본문 -> TagoError. 알 수 없는 오류는 502 */
 function makeCodeError(msg) {
   const m = msg || MSG;
   return (code, text) => {
@@ -151,7 +151,7 @@ const codeError = makeCodeError(MSG);
 const sleep = (ms) => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
 
 /**
- * TAGO 요청 큐. TAGO는 초당 호출 한도가 있어 열차·버스가 하나의 큐를 공유한다.
+ * TAGO 요청 큐. TAGO는 초당 호출 한도가 있어 모든 요청이 하나의 큐를 거친다.
  * run(fn): 작업을 FIFO로 하나씩 실행하고, 앞 작업의 시작 시각에서 minIntervalMs 이상 떨어진 뒤에 시작한다.
  * 실패한 작업은 체인을 끊지 않는다(호출자에게만 오류를 돌려준다).
  */
@@ -172,7 +172,7 @@ function createQueue(minIntervalMs) {
 }
 
 /**
- * TAGO 공통 클라이언트 (열차·버스가 함께 쓴다). fetch 는 항상 큐를 거치고, 초당 한도 오류는 재시도한다.
+ * TAGO 공통 클라이언트. fetch 는 항상 큐를 거치고, 초당 한도 오류는 재시도한다.
  * opts: { env, fetchImpl, queue, retryWaitMs, msg }
  * 반환: { key, hasKey, call(op, params, base), callAll(op, params, base), request(base, op, params) }
  */

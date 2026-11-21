@@ -23,6 +23,15 @@ test('hubOfCategory: 기차역·버스터미널만, 지하철·주차장은 아�
   assert.equal(h('교통,수송 > 지하철,전철 > 수도권1호선'), null);
   assert.equal(h('교통,수송 > 교통시설 > 주차장'), null);
   assert.equal(h(undefined), null);
+  // 카카오가 군내·시내·농어촌버스 정류장도 고속·시외버스터미널로 분류한다 -> 이름으로 뺀다
+  const BUS = '교통,수송 > 교통시설 > 고속,시외버스터미널';
+  assert.equal(h(BUS, '화순군내버스정류장'), null);
+  assert.equal(h(BUS, '○○시내버스정류장'), null);
+  assert.equal(h(BUS, '○○농어촌버스터미널'), null);
+  assert.equal(h(BUS, '화순시외버스공용정류장'), 'bus');
+  assert.equal(h(BUS, '소태터미널'), 'bus');
+  assert.equal(h(BUS, '군내독천터미널'), 'bus'); // 지명 '군내'·'마을'은 빼지 않는다
+  assert.equal(h(BUS, '도암신기마을정류장'), 'bus');
 });
 
 const it = (name, lat, lon, o) => TP.store.newItem({ id: name, name, lat, lon, ...o });
@@ -92,3 +101,4 @@ test('planHubInsert: 뒤 장소와 하루 중간 위치 보존', () => {
   assert.equal(out[3].modeIn, 'bus');
   assert.equal(out[3].hub, 'bus');
 });
+

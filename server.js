@@ -11,7 +11,6 @@ const auth = require('./server/auth');
 const { serveStatic } = require('./server/static');
 const { createTransit } = require('./server/transit');
 const { createTago, createQueue } = require('./server/tago');
-const { createBus } = require('./server/bus');
 const { parsePublicUrls, clientIpFrom } = require('./server/deploy');
 const { computeAppVersion } = require('./server/version');
 
@@ -56,19 +55,16 @@ try {
   process.exit(1);
 }
 const transit = createTransit({ db }); // 카카오 REST 키: 환경변수 TP_KAKAO_REST_KEY
-// TAGO는 초당 호출 한도가 있어 열차·버스가 하나의 큐를 공유한다 (요청 간격 350ms)
+// TAGO는 초당 호출 한도가 있어 모든 요청이 하나의 큐를 거친다 (요청 간격 350ms)
 const tagoQueue = createQueue(350);
 const tago = createTago({ db, queue: tagoQueue }); // TAGO 열차 서비스 키: 환경변수 TP_TAGO_KEY
-const bus = createBus({ db, queue: tagoQueue }); // TAGO 고속·시외버스 (열차와 같은 키)
 db.purgeSessions();
 transit.purge();
 tago.purge();
-bus.purge();
 setInterval(() => {
   db.purgeSessions();
   transit.purge();
   tago.purge();
-  bus.purge();
 }, 60 * 60 * 1000).unref();
 
 const loginLimiter = auth.createLimiter(10, 15 * 60 * 1000); // IP+아이디당 15분에 실패 10회
@@ -398,14 +394,6 @@ async function handleTrain(req, res, what) {
   sendJson(res, r.status, r.body, r.cache ? { 'X-Train-Cache': r.cache } : undefined);
 }
 
-// ---- 고속·시외버스 (TAGO 프록시; 게스트도 사용 가능, 열차와 같은 키) ----
-async function handleBus(req, res) {
-  const q = Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
-  const r = await bus.trips(q, clientIp(req));
-  if (r.cache) console.log(`[bus] trips ${r.cache}`);
-  sendJson(res, r.status, r.body, r.cache ? { 'X-Bus-Cache': r.cache } : undefined);
-}
-
 // ---- 라우팅 ----
 const isJsonType = (req) => String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() === 'application/json';
 
@@ -442,9 +430,6 @@ async function handleApi(req, res, pathname) {
   } else if (route.length === 2 && route[0] === 'train' && (route[1] === 'stations' || route[1] === 'trips')) {
     allow('GET');
     return handleTrain(req, res, route[1]);
-  } else if (route.length === 2 && route[0] === 'bus' && route[1] === 'trips') {
-    allow('GET');
-    return handleBus(req, res);
   } else if (route.length === 2 && route[0] === 'trips') {
     allow('PUT', 'DELETE');
     return method === 'PUT' ? handlePutTrip(req, res, route[1]) : handleDeleteTrip(req, res, route[1]);
@@ -493,7 +478,6 @@ server.listen(PORT, HOST, () => {
   console.log(`카카오 JavaScript 키(TP_KAKAO_JS_KEY): ${KAKAO_JS_KEY ? '설정됨' : '없음 - 지도를 표시할 수 없어요'}`);
   console.log(`카카오 REST API 키(TP_KAKAO_REST_KEY): ${transit.hasKey() ? '설정됨' : '없음 - 대중교통은 조회 실패로 표시돼요(시간은 도보/자동차 기준, 요금 미정)'}`);
   console.log(`TAGO 열차 API 키(TP_TAGO_KEY): ${tago.hasKey() ? '설정됨' : '없음 - 열차 시간표 조회를 쓸 수 없어요(직접 입력은 가능)'}`);
-  console.log(`TAGO 버스 API 키(TP_TAGO_KEY): ${bus.hasKey() ? '설정됨' : '없음 - 고속·시외버스 조회를 쓸 수 없어요'}`);
   console.log('종료하려면 Ctrl+C 를 누르세요.');
 });
 
