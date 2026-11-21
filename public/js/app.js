@@ -518,7 +518,7 @@
   const FALLBACK_HINT = '시간은 자동차 기준으로 계산했고, 요금은 직접 입력해 주세요';
   const nearWalkHint = (leg) => `거리가 가까워요(직선 ${(TP.routing.haversine(leg.from, leg.to) / 1000).toFixed(1)}km). 이동수단을 도보로 바꾸면 더 정확할 수 있어요`;
   const NOROUTE_HINT = '카카오가 대중교통 경로를 찾지 못했어요. ' + FALLBACK_HINT + '. 도시 간 이동처럼 먼 구간은 대중교통으로 조회되지 않아요. 이동수단을 열차로 바꾸는 것을 추천해요';
-  const NOFARE_HINT = '카카오가 이 경로의 요금을 알려주지 않아 합계에서 뺐어요. 요금을 알면 직접 입력해 주세요. 출발지와 도착지가 멀면 이동수단을 열차·버스로 바꿔 조회하거나, 경유지를 추가해 경로를 나눠 보세요';
+  const NOFARE_HINT = '일부 지역 노선이나 심야 노선 등이 포함된 경로는 요금이 조회되지 않아요';
   const NOSERVICE_HINT = '편(출발·도착 시각)을 입력하면 그 시간으로 계산해요. 출발·도착 시각을 입력해 주세요. 입력하기 전에는 시간과 요금을 계산하지 않아요';
   const HUB_NOFARE_HINT = '요금을 알면 직접 입력해 주세요 (일반 성인 1인 요금 기준). 입력하지 않으면 합계에서 빼요';
   const KIND_LABEL = { express: '고속', intercity: '시외' };
