@@ -93,7 +93,7 @@
     return meters / 1000;
   }
 
-  /** 자가용 고속도로 통행료(원, 100원 단위 추정). km: 고속도로 거리(km) */
+  /** 자가용·택시 고속도로 통행료(원, 100원 단위 추정). km: 고속도로 거리(km) */
   function tollFare(km, cfg) {
     if (!(km > 0)) return 0;
     const c = (cfg || DEFAULT_CONFIG).car;
@@ -116,7 +116,7 @@
   /** 한 구간의 비용.
    * opts: { mode, distanceM, depMin, parking, fare, tollKm }  (fare: 대중교통 실제 1인 요금 - 있으면 그대로 사용,
    *  fareMin/fareMax: 요금이 범위로 온 경우 - fare가 없을 때 rangePick 기준으로 사용. 둘 다 없으면 요금 미정(unknown),
-   *  tollKm: 경로 중 고속도로 거리(km, 자가용 통행료 추정용),
+   *  tollKm: 경로 중 고속도로 거리(km, 자가용·택시 통행료 추정용),
    *  override: 사용자 직접 입력 요금(원) - 있으면 계산 대신 사용. 대중교통·도보·자전거는 1인 요금, 택시·자가용은 차량 1대 총액,
    *  unknown: true면 요금 미정(0원, 합계에서 제외))
    * 반환: { total(전체 인원 합), perPerson, fuel, parking, toll, surchargeRate, unknown }
@@ -159,7 +159,8 @@
       }
       case 'taxi': {
         out.surchargeRate = taxiNightRate(opts.depMin == null ? 720 : opts.depMin, cfg);
-        out.total = taxiFare(distM, opts.depMin, cfg);
+        out.toll = tollFare(opts.tollKm, cfg); // 통행료는 미터 요금과 따로 승객이 낸다 (자가용과 같은 고속도로 거리 추정)
+        out.total = taxiFare(distM, opts.depMin, cfg) + out.toll;
         out.perPerson = out.total / people;
         break;
       }

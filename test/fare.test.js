@@ -32,6 +32,17 @@ test('legCost 자가용: 직접 입력은 연료비·통행료·주차비를 모
   assert.equal(c.total, 12000);
 });
 
+test('legCost 택시: 미터 요금 + 통행료(고속도로 거리 추정), 고속도로가 없으면 통행료 0, 직접 입력은 대체', () => {
+  const meter = fare.taxiFare(100000, 720);
+  const c = fare.legCost({ mode: 'taxi', distanceM: 100000, depMin: 720, tollKm: 100 });
+  assert.equal(c.toll, 5300);
+  assert.equal(c.total, meter + 5300);
+  const noHighway = fare.legCost({ mode: 'taxi', distanceM: 100000, depMin: 720 });
+  assert.equal(noHighway.toll, 0);
+  assert.equal(noHighway.total, meter);
+  assert.equal(fare.legCost({ mode: 'taxi', distanceM: 100000, depMin: 720, tollKm: 100, override: 50000 }).total, 50000);
+});
+
 test('legCost 열차·버스: 1인 요금 x 인원, 요금을 모르면 미정, 직접 입력은 1인 기준', () => {
   const cfg = { ...fare.DEFAULT_CONFIG, people: 3 };
   for (const mode of ['train', 'bus']) {
