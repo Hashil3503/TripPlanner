@@ -44,10 +44,10 @@
   const fmtDate = (d) => (d ? `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEK[d.getDay()]})` : '');
 
   // ---- 구간 계산 ----
-  /** 이동수단 결정: 사용자가 고른 값 > 자동(<= autoWalkKm 도보, 그 외 대중교통) */
+  /** 이동수단 결정: 사용자가 고른 값 > 자동(<= autoWalkKm 도보, 그 외 자가용 — 2026-11-21 사용자 결정으로 대중교통에서 바꿈) */
   function resolveMode(item, prev, settings) {
     if (item.modeIn && MODE_IDS.includes(item.modeIn)) return item.modeIn;
-    return TP.routing.haversine(prev, item) <= settings.est.autoWalkKm * 1000 ? 'walk' : 'transit';
+    return TP.routing.haversine(prev, item) <= settings.est.autoWalkKm * 1000 ? 'walk' : 'car';
   }
 
   /** 편 정보가 올바르면(dep·arr 0..1439 정수) 그대로, 아니면 null */
