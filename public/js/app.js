@@ -700,7 +700,7 @@
     }
     // 택시·자가용 요금은 추정이다 (요금을 직접 입력했으면 제외)
     if ((leg.mode === 'taxi' || leg.mode === 'car') && !leg.loading && !leg.override.cost) {
-      mark('추정', leg.mode === 'taxi' ? '서울 중형택시 기준 추정 요금이라 실제와 다를 수 있어요' : '연료비·통행료는 추정이라 실제와 다를 수 있어요');
+      mark('추정', leg.mode === 'taxi' ? '서울 중형택시 기준·통행료 추정 요금이라 실제와 다를 수 있어요' : '연료비·통행료는 추정이라 실제와 다를 수 있어요');
     }
 
     const details = [];
@@ -708,8 +708,12 @@
       details.push(leg.mode === 'taxi' || leg.mode === 'car' ? '직접 입력한 요금은 차량 1대 총액으로 봐요' : '직접 입력한 요금은 1인 기준이에요');
     } else if (leg.mode === 'car') {
       details.push(`연료비 ${won(leg.cost.fuel)}` + (leg.cost.toll ? ` + 통행료 약 ${won(leg.cost.toll)}` : '') + (leg.cost.parking ? ` + 주차 ${won(leg.cost.parking)}` : '') + (leg.estimated && !leg.loading ? ' · 통행료 미포함(경로 조회 실패)' : ''));
-    } else if (leg.mode === 'taxi' && settings().people > 1) {
-      details.push('택시 요금은 인원이 나눠 낸다고 가정');
+    } else if (leg.mode === 'taxi' && (leg.cost.toll || settings().people > 1 || (leg.estimated && !leg.loading))) {
+      const parts = [];
+      if (leg.cost.toll) parts.push(`택시 요금 ${won(leg.cost.total - leg.cost.toll)} + 통행료 약 ${won(leg.cost.toll)}`);
+      else if (leg.estimated && !leg.loading) parts.push('통행료 미포함(경로 조회 실패)');
+      if (settings().people > 1) parts.push('택시 요금은 인원이 나눠 낸다고 가정');
+      details.push(parts.join(' · '));
     } else if (leg.noService) {
       details.push(lkMsg || '출발·도착 시각을 입력하면 시간이 계산돼요');
     } else if (leg.transit && leg.fallbackReason) {
@@ -920,7 +924,7 @@
       el('h4', { text: '일차별 합계' }),
       el('div', { class: 'day-rows' }, dayRows),
       ...(t.unknownCostLegs ? [el('p', { class: 'summary-note warn' }, [icon('alert'), `${unknownNote(t.unknownCostLegs)} (이동 구간의 직접 입력으로 채울 수 있어요)`])] : []),
-      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)입니다. 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 두어 합계에서 제외해요. 두 장소가 가까우면(직선 2km 이하) 도보로 바꿔 보라고 안내해요. 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 서울 중형택시 기준 추정치이고 통행료(고속도로)는 포함되지 않습니다. 자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다. 열차·버스(고속·시외)는 편을 직접 입력하거나 조회한 편 기준이고, 요금은 일반 성인 기준이라 실제와 다를 수 있습니다. 편을 입력하지 않으면 시간은 계산하지 않고(시간 미정) 요금은 미정으로 두어 합계에서 제외해요. ' + `열차 시간표·요금은 ${lookupLimitText()}까지만 조회돼요.` })
+      el('p', { class: 'muted small fine-print', text: '※ 대중교통은 카카오맵 실경로·요금(교통카드 성인 기준)입니다. 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 두어 합계에서 제외해요. 두 장소가 가까우면(직선 2km 이하) 도보로 바꿔 보라고 안내해요. 이동 구간의 「직접 입력」으로 시간·요금을 바꿀 수 있습니다. 요금이 범위로 오는 경로는 설정에서 고른 기준(기본 최대값)으로 계산합니다. 택시 요금은 서울 중형택시 기준 추정치에 통행료를 더한 값입니다. 택시·자가용 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로는 실제보다 적게 나올 수 있습니다. 택시·자가용은 차량 1대를 인원이 나눠 쓴다고 가정합니다. 열차·버스(고속·시외)는 편을 직접 입력하거나 조회한 편 기준이고, 요금은 일반 성인 기준이라 실제와 다를 수 있습니다. 편을 입력하지 않으면 시간은 계산하지 않고(시간 미정) 요금은 미정으로 두어 합계에서 제외해요. ' + `열차 시간표·요금은 ${lookupLimitText()}까지만 조회돼요.` })
     );
   }
 
@@ -1855,7 +1859,7 @@
       ])
     ), el('fieldset', {}, [
       el('legend', { text: '요금 추정 기준' }),
-      el('p', { class: 'hint', text: '택시 비용은 서울 요금 기준으로 추정해요. 대중교통 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 둬요. 실제 금액은 구간에서 직접 입력할 수 있어요.' }),
+      el('p', { class: 'hint', text: '택시 비용은 서울 요금 기준에 고속도로 통행료를 더해 추정해요. 대중교통 경로를 찾지 못한 구간은 시간을 자동차 기준으로 계산하고 요금은 미정으로 둬요. 실제 금액은 구간에서 직접 입력할 수 있어요.' }),
       el('details', { class: 'fixed-settings' }, [
         el('summary', { text: '추정 기준 보기' }),
         ...FIXED_SCHEMA.map((g) =>
