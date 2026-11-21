@@ -1324,7 +1324,7 @@
     $('#itemLat').value = it.lat;
     $('#itemLon').value = it.lon;
     $('#itemCat').value = it.category;
-    $('#itemStay').value = it.stay;
+    $('#itemStay').value = F.fmtStay(it.stay);
     $('#itemStay').disabled = false; // 이전에 연 장소의 상태를 지운다
     delete $('#itemStay').dataset.saved;
     $('#itemFixedStart').value = it.fixedStart || '';
@@ -1370,7 +1370,7 @@
     const both = !!(fs && fe) && !$('#itemFixedEnd').disabled;
     if (both && !stay.disabled) stay.dataset.saved = stay.value; // 시각을 지우면 원래 체류 시간으로 되돌린다
     if (!both && stay.disabled && stay.dataset.saved != null) stay.value = stay.dataset.saved;
-    if (both && fe > fs) stay.value = F.parseTime(fe) - F.parseTime(fs);
+    if (both && fe > fs) stay.value = F.fmtStay(F.parseTime(fe) - F.parseTime(fs));
     stay.disabled = both; // 열차·버스 출발 시각에 묶여도 체류는 열려 있다(열차 기본 편을 고를 때 최소 체류로 쓴다)
     stay.title = both ? '시작·종료 시각을 정해서 체류 시간은 그 차이로 계산돼요' : '';
     showItemError('');
@@ -1383,6 +1383,11 @@
     const feLocked = $('#itemFixedEnd').disabled; // 열차·버스 출발 시각을 따르는 중이면 입력값 대신 저장된 값을 보존
     const fe = feLocked ? it.fixedEnd : $('#itemFixedEnd').value || null;
     if (!feLocked && fs && fe && fe <= fs) return showItemError('종료 시각은 시작 시각보다 늦어야 해요.');
+    let stayVal = it.stay;
+    if (!(fs && fe && !feLocked)) {
+      stayVal = F.parseStay($('#itemStay').value);
+      if (stayVal == null) return showItemError('체류 시간은 HH:MM 형식(00:00~24:00)으로 입력해 주세요.');
+    }
     const nn = (id, def, min, max) => {
       const v = Number($(id).value);
       return isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
@@ -1391,7 +1396,7 @@
     it.lat = nn('#itemLat', it.lat, -90, 90);
     it.lon = nn('#itemLon', it.lon, -180, 180);
     it.category = $('#itemCat').value;
-    if (!(fs && fe && !feLocked)) it.stay = Math.round(nn('#itemStay', 0, 0, 1440)); // 둘 다 정하면 체류는 시각 차이로 계산되므로 기존 값을 보존
+    if (!(fs && fe && !feLocked)) it.stay = stayVal; // 둘 다 정하면 체류는 시각 차이로 계산되므로 기존 값을 보존
     it.fixedStart = fs;
     it.fixedEnd = fe;
     it.cost = Math.round(nn('#itemCost', 0, 0, 1e9));
@@ -2280,6 +2285,7 @@
 
     $('#itemFixedEnd').addEventListener('input', syncItemTimeFields);
     $('#itemFixedStart').addEventListener('input', syncItemTimeFields);
+    $('#itemStay').addEventListener('input', () => showItemError(''));
     $('#peopleInput').addEventListener('change', (e) => {
       settings().people = Math.min(99, Math.max(1, Math.round(Number(e.target.value) || 1)));
       S.save();

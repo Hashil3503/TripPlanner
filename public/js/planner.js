@@ -15,6 +15,20 @@
     const m = /^(\d{1,2}):(\d{2})$/.exec(s || '');
     return m ? Number(m[1]) * 60 + Number(m[2]) : 540;
   }
+  /** 체류 분(0~1440) -> 'HH:MM' */
+  function fmtStay(min) {
+    const m = Math.min(1440, Math.max(0, Math.round(Number(min) || 0)));
+    return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+  }
+  /** 'HH:MM'(00:00~24:00, 빈 값은 0) -> 분. 형식이 틀리거나 24:00을 넘으면 null */
+  function parseStay(s) {
+    const v = String(s == null ? '' : s).trim();
+    if (!v) return 0;
+    const m = /^(\d{1,2}):([0-5]\d)$/.exec(v);
+    if (!m) return null;
+    const total = Number(m[1]) * 60 + Number(m[2]);
+    return total <= 1440 ? total : null;
+  }
   /** 자정 기준 분 -> 'HH:MM' (24시간 이후는 '익일 HH:MM') */
   function fmtTime(min) {
     const m = Math.round(min);
@@ -366,7 +380,7 @@
     return { days, totals, people };
   }
 
-  TP.fmt = { fmtTime, fmtDuration, fmtDist, fmtWon, fmtDate, parseTime, dayDate };
+  TP.fmt = { fmtTime, fmtDuration, fmtDist, fmtWon, fmtDate, parseTime, fmtStay, parseStay, dayDate };
   /** 구간 색: 일차 전체 표시 중이면 일차 색, 한 일차만 보일 땐 구간 순서(0부터)대로 팔레트를 돌려 쓴다 */
   function legColor(dayColor, legIndex, showAll) {
     return showAll ? dayColor : LEG_COLORS[legIndex % LEG_COLORS.length];

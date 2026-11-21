@@ -509,3 +509,21 @@ test('busGrades: 종류별 TAGO 등급 목록, 종류 미선택이면 비어 있
   assert.deepEqual(g(''), []);
   assert.deepEqual(g(null), []);
 });
+
+test('fmtStay / parseStay: 분과 HH:MM(00:00~24:00) 변환 및 잘못된 형식 거부', () => {
+  const { fmtStay, parseStay } = TP.fmt;
+  assert.equal(fmtStay(0), '00:00');
+  assert.equal(fmtStay(90), '01:30');
+  assert.equal(fmtStay(1440), '24:00');
+  assert.equal(fmtStay(-10), '00:00');
+  assert.equal(fmtStay(2000), '24:00');
+  assert.equal(parseStay(''), 0);
+  assert.equal(parseStay('  '), 0);
+  assert.equal(parseStay('01:30'), 90);
+  assert.equal(parseStay('1:30'), 90);
+  assert.equal(parseStay('00:00'), 0);
+  assert.equal(parseStay('24:00'), 1440);
+  for (const bad of ['24:01', '25:00', '1:60', '90', '0130', 'abc', '-1:00']) {
+    assert.equal(parseStay(bad), null, `expected null for ${bad}`);
+  }
+});
