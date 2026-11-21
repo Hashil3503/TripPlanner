@@ -171,15 +171,18 @@
       .slice(0, limit || 8);
   }
 
-  /** 후보와 같은 순서의 열차 수(null = 조회 실패) -> 열차가 1편 이상인 후보만, 순서 그대로 [{ ...cand, count }] */
-  const withTrains = (cands, counts) => cands.map((c, i) => ({ ...c, count: counts[i] })).filter((c) => c.count > 0);
+  /** 후보와 같은 순서의 열차 수(숫자, 또는 조회 실패면 { error: 안내 문구 }) -> 열차가 1편 이상이거나 조회에 실패한 후보, 순서 그대로 [{ ...cand, count }].
+   *  조회 실패는 '열차 없음'이 아니므로 빼지 않는다(화면에 '열차 확인 못 함'과 원인을 보여 준다) */
+  const withTrains = (cands, counts) => cands.map((c, i) => ({ ...c, count: counts[i] })).filter((c) => c.count > 0 || (c.count && c.count.error));
 
-  /** 두 장소 사이 열차 수. 조회 실패면 null. side: 'dep'이면 후보 -> 고정역, 'arr'이면 고정역 -> 후보 */
+  /** 두 장소 사이 열차 수. 조회 실패면 { error: 서버가 준 안내 문구 }. side: 'dep'이면 후보 -> 고정역, 'arr'이면 고정역 -> 후보 */
   async function countTrips(cand, fixed, side, ymd) {
     const [a, b] = side === 'dep' ? [cand, fixed] : [fixed, cand];
     await get(a, b, ymd);
     const r = peek(a, b, ymd);
-    return r.state === 'ok' ? r.trips.length : r.reason === 'noresult' ? 0 : null;
+    if (r.state === 'ok') return r.trips.length;
+    if (r.reason === 'noresult') return 0;
+    return { error: r.message || '열차 조회에 실패했어요. 잠시 후 다시 시도해 주세요.' };
   }
 
   /** 후보마다 열차 수를 limit개씩 동시에 조회 -> counts 배열 (후보 순서) */

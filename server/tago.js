@@ -137,7 +137,7 @@ function pickStation(docs, name, city, others) {
 /** TAGO 오류 코드/본문 -> TagoError. 알 수 없는 오류는 502 */
 function codeError(code, text) {
   const c = String(code || '');
-  if (c === '22' || /LIMITED_NUMBER_OF_SERVICE_REQUESTS/.test(text || '')) return new TagoError(429, MSG.quota);
+  if (c === '22' || c === '23' || /LIMITED_NUMBER_OF_SERVICE_REQUESTS/.test(text || '')) return new TagoError(429, MSG.quota); // 22: 하루 한도, 23: 초당 한도
   if (['30', '31', '32', '33'].includes(c) || /SERVICE_KEY|SERVICE_ACCESS_DENIED|UNREGISTERED/.test(text || '')) return new TagoError(502, MSG.auth);
   return new TagoError(502, MSG.upstream);
 }

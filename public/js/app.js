@@ -1604,6 +1604,7 @@
               const counts = await TP.train.countAll(all, fixed, s, ymd, 3);
               recs = TP.train.withTrains(all, counts);
               if (!recs.length) status = 'none';
+              else if (recs.every((r) => r.count && r.count.error)) status = 'error'; // 모두 조회 실패: '열차 없음'이 아니다
             } else if (all.length && !inWin) status = 'period';
             if (!hubState || seq !== side.recSeq) return;
             side.recs = recs.slice(0, HUB_REC_MAX);
@@ -1636,10 +1637,13 @@
     const opt = (r, i) => {
       const radio = el('input', { type: 'radio', name: `hubPick-${s}`, value: String(i) });
       radio.checked = side.pick === r;
+      const failed = Boolean(r.count && r.count.error); // 조회 실패 (한도 초과·지연 등) — 열차가 없다는 뜻이 아니다
+      const countText = failed ? '열차 확인 못 함' : typeof r.count === 'number' ? `${r.count}편` : '';
       return el('label', { class: 'route-opt' }, [
         radio,
-        el('div', { class: 'route-opt-head' }, [el('strong', { text: r.name }), el('span', { class: 'grow' }), el('span', { class: 'muted-s', text: [distText(r.distance), r.count != null ? `${r.count}편` : ''].filter(Boolean).join(' · ') })]),
+        el('div', { class: 'route-opt-head' }, [el('strong', { text: r.name }), el('span', { class: 'grow' }), el('span', { class: 'muted-s', text: [distText(r.distance), countText].filter(Boolean).join(' · ') })]),
         r.displayName ? el('span', { class: 'muted-s', text: r.displayName }) : null,
+        failed ? el('span', { class: 'muted-s', text: r.count.error }) : null,
       ]);
     };
     const w = hubWord(hubState.mode);
@@ -1650,7 +1654,8 @@
       nocity: `20km 안에 열차${w}이 없어요. ${w} 이름으로 검색해 주세요`,
       ok: `근처에서 조회할 수 있는 ${w}을 찾지 못했어요. 위에서 검색해 주세요.`,
     }[side.status];
-    const note = side.status === 'period' ? el('p', { class: 'hub-empty', text: '열차 조회 기간(약 4주) 밖이라 열차가 있는지 확인하지 못했어요' }) : null;
+    const note = side.status === 'period' ? el('p', { class: 'hub-empty', text: '열차 조회 기간(약 4주) 밖이라 열차가 있는지 확인하지 못했어요' })
+      : side.status === 'error' ? el('p', { class: 'hub-empty', text: '열차 조회에 실패해 열차가 있는지 확인하지 못했어요. 잠시 후 다시 시도해 주세요' }) : null;
     recList.replaceChildren(...(nRecs ? [...(note ? [note] : []), ...side.recs.map(opt)] : [el('p', { class: 'hub-empty', text: msg || '' })]));
     foundList.replaceChildren(...(q && !side.found.length ? [el('p', { class: 'hub-empty', text: q.length < 2 ? '두 글자 이상 입력해 주세요' : side.pending ? '검색하는 중…' : '검색 결과가 없어요' })] : side.found.map((r, i) => opt(r, nRecs + i))));
   }
