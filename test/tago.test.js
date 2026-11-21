@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { createTago, normTrips, validDate, nameKeys } = require('../server/tago');
+const { createTago, normTrips, validDate, nameKeys, pickStation } = require('../server/tago');
 
 // transit_cache 를 흉내 내는 메모리 DB
 function memDb() {
@@ -174,7 +174,7 @@ test('stations: 카카오 키워드 검색으로 좌표를 붙인다 (기차역 
   const kakao = new Map([
     ['서울역', [doc('서울역 1호선', '교통,수송 > 지하철,전철 > 수도권1호선', '1', '1'), doc('서울역 주차장', '교통,수송 > 교통시설 > 주차장', '2', '2'), doc('서울역', TRAIN, '37.55', '126.97')]],
     ['김천구미역', [doc('김천(구미)역', TRAIN, '36.11', '128.18')]],
-    ['판교(경기)역', [doc('판교역(충남)', TRAIN, '9', '9'), doc('판교역(경기)', TRAIN, '37.39', '127.11')]],
+    ['판교 경기역', [doc('판교역(충남)', TRAIN, '9', '9'), doc('판교역(경기)', TRAIN, '37.39', '127.11')]], // 검색어는 괄호를 뺀다
     ['춘천역', [doc('남춘천역', TRAIN, '3', '3'), doc('춘천역 경춘선', '교통,수송 > 지하철,전철 > 경춘선', '4', '4')]], // 노선 표기를 떼고 지하철역으로
     ['일산역', [doc('일산역 주차장', '교통,수송 > 교통시설 > 주차장', '5', '5')]], // 일치 없음 -> null (두 번째 검색도 없음)
     ['대전 기차역', [doc('대전', '교통,수송 > 교통시설', '6', '6')]], // 두 번째 검색, 3순위 분류
@@ -204,8 +204,34 @@ test('stations: 카카오 키워드 검색으로 좌표를 붙인다 (기차역 
   ]);
   assert.strictEqual(r.status, 200);
   assert.ok(seen.length >= 8 && seen.every((a) => a === 'KakaoAK kk'));
-  assert.ok(calls.includes('판교(경기)역'));
+  assert.ok(calls.includes('판교 경기역'));
   assert.strictEqual((await t.stations('ip')).cache, 'HIT');
+});
+
+test('pickStation: 시·도 대조, 이름 포함, 앞 두 글자 대체, 다른 역 이름 거부, 폐역은 뒤로', () => {
+  const TRAIN = '교통,수송 > 기차,철도 > 기차역';
+  const SUB = '교통,수송 > 지하철,전철 > 수도권5호선';
+  const d = (place_name, y, address_name, category_name = TRAIN) => ({ place_name, category_name, y: String(y), x: '1', address_name });
+  const at = (p) => (p ? p.lat : null);
+  // 부산 송정이 서울 송정역 5호선에 붙지 않는다
+  assert.strictEqual(at(pickStation([d('송정역 5호선', 1, '서울 강서구 공항동', SUB), d('송정역 동해선', 2, '부산 해운대구 송정동', SUB)], '송정', '부산광역시')), 2);
+  assert.strictEqual(at(pickStation([d('평촌역 4호선', 1, '경기 안양시 동안구', SUB)], '평촌', '경상남도')), null);
+  // 카카오 '전남광주통합특별시'는 전남·광주 둘 다
+  assert.strictEqual(at(pickStation([d('광주송정역', 3, '전남광주통합특별시 광산구')], '광주송정', '광주광역시')), 3);
+  assert.strictEqual(at(pickStation([d('목포역', 4, '전남광주통합특별시 목포시')], '목포', '전라남도')), 4);
+  // 이름이 같은 곳이 포함하는 곳보다 먼저 (남춘천 < 춘천)
+  assert.strictEqual(at(pickStation([d('남춘천역', 5, '강원특별자치도 춘천시'), d('춘천역 경춘선', 6, '강원특별자치도 춘천시', SUB)], '춘천', '강원특별자치도')), 6);
+  // 이름이 달라도 첫 철도역의 앞 두 글자가 같으면 (KAKAO_NAME 대신)
+  assert.strictEqual(at(pickStation([d('여수엑스포역', 7, '전남광주통합특별시 여수시')], '여수EXPO', '전라남도')), 7);
+  assert.strictEqual(at(pickStation([d('제천역', 8, '충북 제천시')], '장락', '충청북도')), null);
+  // ...하지만 그 장소가 다른 TAGO 역 이름이면 받지 않는다
+  const others = new Set(['망상', '망상해변'].flatMap(nameKeys));
+  assert.strictEqual(at(pickStation([d('망상역 (폐역)', 9, '강원특별자치도 동해시')], '망상해변', '강원특별자치도', others)), null);
+  // 다른 역 이름은 건너뛰고 그다음 결과를 본다 (첫 결과만 보지 않는다)
+  assert.strictEqual(at(pickStation([d('망상역 (폐역)', 9, '강원특별자치도 동해시'), d('망상해수욕장역 임시승강장 (폐역)', 12, '강원특별자치도 동해시')], '망상해변', '강원특별자치도', others)), 12);
+  assert.strictEqual(at(pickStation([d('망상역 (폐역)', 9, '강원특별자치도 동해시')], '망상', '강원특별자치도', others)), 9);
+  // 폐역 표기는 운영 중인 지하철역보다 뒤
+  assert.strictEqual(at(pickStation([d('연천역 (폐역)', 10, '경기 연천군'), d('연천역 1호선', 11, '경기 연천군', SUB)], '연천', '경기도')), 11);
 });
 
 test('nameKeys: 괄호를 붙인 이름이 먼저', () => {
