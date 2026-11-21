@@ -14,7 +14,7 @@ const ROWS = 1000;
 const MAX_PAGES = 10;
 const RATE_MAX = 30;
 const RATE_WINDOW_MS = 60 * 1000;
-const PREFIX = 'tago-v4|';
+const PREFIX = 'tago-v5|'; // v5: 역 좌표 대조 규칙 변경(시·도 대조, 느슨한 이름 일치) — 옛 역 목록 캐시를 버린다
 const STATIONS_KEY = `${PREFIX}stations`;
 const KAKAO_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
 const KAKAO_CONCURRENCY = 5;
@@ -86,27 +86,52 @@ function nameKeys(name) {
   return joined === bare ? [joined] : [joined, bare];
 }
 
-// shortcut: 카카오 이름이 TAGO 이름과 다른 주요 역만 손으로 맞춘다. 좌표를 못 찾는 큰 역이 더 생기면 여기에 추가
-const KAKAO_NAME = { 여수EXPO: '여수엑스포', 인천공항T1: '인천공항1터미널', 인천공항T2: '인천공항2터미널', 진부: '진부(오대산)' };
+/** 카카오 검색어용: 괄호·가운뎃점 같은 특수문자를 공백으로 ('판교(경기)' -> '판교 경기') */
+const searchName = (s) => s.replace(/[()（）·・[\]/,._]/g, ' ').replace(/\s+/g, ' ').trim();
+/** 카카오에 남은 폐역·화물역 표기: 같은 조건이면 뒤로 (TAGO에 있는 역이면 위치는 같은 곳) */
+const DEAD_RE = /폐역|화물역|신호장/;
+/** 카카오 이름의 끝 노선 표기(' 1호선', ' 경춘선', ' 공항철도')와 폐역 표기(' (폐역)', '화물역' -> '역')를 뗀 비교용 이름 */
+const docKey = (n) => joinedKey(String(n || '').replace(/\s*[(（]폐역[)）]/g, '').replace(/(화물|신호장)(?=역|$)/g, '').replace(/\s+\S*(선|철도)$/, ''));
+/** 장소 분류 우선순위: 기차역 > 지하철·전철역 (낮을수록 우선, 철도역이 아니면 null) */
+const tierOf = (c) => (/기차역/.test(c) ? 0 : /지하철,전철|전철역|지하철역/.test(c) ? 1 : null);
 
-/** 카카오 지하철 이름의 끝 노선 표기(' 1호선', ' 경춘선', ' 공항철도')를 뗀 비교용 이름 */
-const docKey = (n) => joinedKey(String(n || '').replace(/\s+\S*(선|철도)$/, ''));
-/** 장소 분류 우선순위: 기차역 > 지하철·전철역 > 그 밖의 교통,수송 (낮을수록 우선, 해당 없으면 null) */
-const tierOf = (c) => (/기차역/.test(c) ? 0 : /지하철,전철|전철역|지하철역/.test(c) ? 1 : /^교통,수송/.test(c) ? 2 : null);
+// 시·도 이름 -> 비교용 짧은 이름. TAGO는 '충청북도', 카카오 주소는 '충북'처럼 쓴다
+const REGION_PREFIX = [['서울', '서울'], ['부산', '부산'], ['대구', '대구'], ['인천', '인천'], ['광주', '광주'], ['대전', '대전'], ['울산', '울산'], ['세종', '세종'], ['경기', '경기'], ['강원', '강원'],
+  ['충청북', '충북'], ['충북', '충북'], ['충청남', '충남'], ['충남', '충남'], ['전라북', '전북'], ['전북', '전북'], ['전라남', '전남'], ['전남', '전남'], ['경상북', '경북'], ['경북', '경북'], ['경상남', '경남'], ['경남', '경남'], ['제주', '제주']];
+function regionsOf(s) {
+  const t = String(s || '');
+  if (t.startsWith('전남광주')) return ['전남', '광주']; // 카카오 주소의 '전남광주통합특별시'
+  const hit = REGION_PREFIX.find(([p]) => t.startsWith(p));
+  return hit ? [hit[1]] : [];
+}
+/** TAGO 역의 시·도와 카카오 주소의 시·도가 같은가. 한쪽이라도 모르면 막지 않는다 */
+function sameRegion(city, address) {
+  const a = regionsOf(city);
+  const b = regionsOf(String(address || '').split(' ')[0]);
+  return !a.length || !b.length || a.some((x) => b.includes(x));
+}
 
-/** 카카오 키워드 검색 결과(documents) 중 이름이 정확히 같은 곳을 분류 우선순위대로 -> { lat, lon } | null (못 찾으면 추측하지 않는다) */
-function pickStation(docs, name) {
-  for (let tier = 0; tier < 3; tier++) {
-    for (const k of nameKeys(name)) {
-      for (const d of docs || []) {
-        if (!d || tierOf(d.category_name || '') !== tier || docKey(d.place_name) !== k) continue;
-        const lat = parseFloat(d.y);
-        const lon = parseFloat(d.x);
-        if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
-      }
-    }
+/** 카카오 키워드 검색 결과(documents) -> { lat, lon } | null. 철도역 분류이고 시·도가 같은 곳 중에서
+ *  ① 이름이 같은 곳 ② 이름을 포함하는 곳(남춘천보다 춘천 먼저) ③ 둘 다 없으면 검색 순서대로 이름 앞 두 글자가 같은 첫 곳('여수EXPO' -> '여수엑스포역').
+ *  ③은 다른 TAGO 역 이름인 장소는 건너뛴다(others: 모든 역의 nameKeys, '망상해변'이 '망상역'을 잡지 않고 그다음 '망상해수욕장역'으로).
+ *  같은 순위면 운영 중인 기차역 > 지하철 > 폐역 표기. 못 찾으면 추측하지 않는다 */
+function pickStation(docs, name, city, others) {
+  const keys = nameKeys(name);
+  const rail = (docs || []).filter((d) => d && tierOf(d.category_name || '') !== null && sameRegion(city, d.address_name) && Number.isFinite(parseFloat(d.y)) && Number.isFinite(parseFloat(d.x)));
+  let best = null;
+  let bestRank = Infinity;
+  for (const d of rail) {
+    const k = docKey(d.place_name);
+    const match = keys.includes(k) ? 0 : keys.some((x) => k.includes(x)) ? 1 : null;
+    if (match === null) continue;
+    const rank = match * 10 + (DEAD_RE.test(d.place_name) ? 4 : 0) + tierOf(d.category_name) * 2; // 폐역 표기는 운영 중인 지하철역보다도 뒤
+    if (rank < bestRank) { best = d; bestRank = rank; }
   }
-  return null;
+  if (!best && keys[0].length >= 2) {
+    const head = keys[0].slice(0, 2);
+    best = rail.find((d) => { const k = docKey(d.place_name); return k.startsWith(head) && !(others && others.has(k)); }) || null;
+  }
+  return best ? { lat: parseFloat(best.y), lon: parseFloat(best.x) } : null;
 }
 
 /** TAGO 오류 코드/본문 -> TagoError. 알 수 없는 오류는 502 */
@@ -213,13 +238,13 @@ function createTago(opts) {
     return { stations };
   }
 
-  async function kakaoSearch(query, name) {
+  async function kakaoSearch(query, name, city, others) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
       const res = await doFetch(`${KAKAO_URL}?query=${encodeURIComponent(query)}`, { headers: { Authorization: `KakaoAK ${kakaoKey}` }, signal: ctrl.signal });
       if (!res.ok) return null;
-      return pickStation((JSON.parse(await res.text()) || {}).documents, name);
+      return pickStation((JSON.parse(await res.text()) || {}).documents, name, city, others);
     } finally { clearTimeout(timer); }
   }
 
@@ -227,14 +252,15 @@ function createTago(opts) {
   async function attachCoords(stations) {
     for (const s of stations) { s.lat = null; s.lon = null; }
     if (!kakaoKey) return;
+    const others = new Set(stations.flatMap((s) => nameKeys(s.name)));
     let next = 0;
     const worker = async () => {
       while (next < stations.length) {
         const s = stations[next++];
         try {
-          const kn = KAKAO_NAME[s.name] || s.name;
-          for (const q of [`${kn}역`, `${kn} 기차역`]) { // 첫 검색에서 못 찾으면 한 번 더
-            const found = await kakaoSearch(q, kn);
+          const q0 = searchName(s.name);
+          for (const q of [`${q0}역`, `${q0} 기차역`]) { // 첫 검색에서 못 찾으면 한 번 더
+            const found = await kakaoSearch(q, s.name, s.city, others);
             if (found) { s.lat = found.lat; s.lon = found.lon; break; }
           }
         } catch (e) { /* 이 역은 좌표 없음 */ }
