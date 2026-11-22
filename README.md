@@ -48,22 +48,13 @@
 
 ## 기술 스택
 
-| 분야 | 기술 | 설명 |
-| :--- | :--- | :--- |
-| **Frontend** | Vanilla JavaScript · HTML · CSS | 빌드 도구·프레임워크 없이 전역 `window.TP` 네임스페이스로 모듈을 나누고 `<script>` 순서대로 로드. CSS 변수 기반 라이트/다크 테마, 반응형(데스크톱 3열 · 태블릿 오버레이 · 모바일 하단 시트) |
-| | 카카오맵 JavaScript SDK | 지도·마커·경로선, `services` 라이브러리로 장소 검색과 좌표→주소 |
-| | SortableJS 1.15 (CDN) | 일정 드래그 정렬 |
-| **Backend** | Node.js 24 (`node:http`) | npm 의존성 0개. 정적 파일 제공 + REST API |
-| | SQLite (`node:sqlite`) | 계정·세션·여행(낙관적 잠금 `rev`)·외부 API 응답 캐시 |
-| | `node:crypto` | 비밀번호 scrypt 해시, 세션 토큰(DB에는 SHA-256만 저장) |
-| | `node:test` | 단위·API 테스트 132개 (`npm test`) |
-| **외부 API** | 카카오 대중교통 길찾기 REST API | 대중교통 실경로·소요 시간·요금. 서버가 키를 숨기고 대신 호출·캐시 |
-| | OSRM (FOSSGIS 공개 서버) | 도보·자전거·자동차 경로와 고속도로 구간(통행료 추정) |
-| | TAGO 열차정보 (공공데이터포털) | 열차 역 목록·시간표·일반 성인 요금. 서버 프록시 |
-| **Infra** | Oracle Cloud Always Free VM (Ubuntu) | 상시 운영 서버 |
-| | Caddy | 리버스 프록시, Let's Encrypt 자동 HTTPS |
-| | systemd · cron | 서비스 관리, 매일 DB 스냅샷 백업(`VACUUM INTO`, 14일 보관) |
-| | DuckDNS | 무료 도메인 `tplanner.duckdns.org` |
+| 분야 | 기술 |
+| :--- | :--- |
+| **Frontend** | Vanilla JavaScript, HTML, CSS, 카카오맵 JavaScript SDK, SortableJS |
+| **Backend** | Node.js 24 (`node:http`, `node:sqlite`, `node:crypto`), SQLite |
+| **외부 API** | 카카오 대중교통 길찾기 REST API, OSRM, TAGO 열차정보 (공공데이터포털) |
+| **Test** | `node:test` |
+| **Infra** | Oracle Cloud (Ubuntu), Caddy, systemd, cron, DuckDNS |
 
 ## 실행 방법
 
