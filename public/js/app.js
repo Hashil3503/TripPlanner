@@ -1184,7 +1184,6 @@
             el('button', { type: 'button', class: 'result-main', title: '지도에서 보기', onclick: () => TP.map.showPlace(r, true) }, [
               el('span', { class: 'result-head' }, [
                 el('span', { class: 'result-name', text: r.name }),
-                el('span', { class: 'result-tag', text: r.source === 'kakao' ? '카카오' : 'OSM' }),
               ]),
               el('span', { class: 'result-sub', text: r.displayName }),
             ]),
@@ -1195,7 +1194,7 @@
     } catch (e) {
       if (e && e.name === 'AbortError') return;
       if (seq !== searchSeq) return;
-      showMessage('검색에 실패했어요. 잠시 후 다시 시도해 주세요.', 'error');
+      showMessage(TP.kakao.status().state === 'ready' ? '검색에 실패했어요. 잠시 후 다시 시도해 주세요.' : '카카오 지도를 불러오지 못해 장소를 검색할 수 없어요. 설정(⚙)에서 카카오 키 상태를 확인해 주세요.', 'error');
     }
   }
 
@@ -1208,7 +1207,7 @@
       hideResults();
       return;
     }
-    searchTimer = setTimeout(() => runSearch(q), TP.geocode.debounceMs()); // 디바운스 (카카오 300ms / Nominatim 700ms)
+    searchTimer = setTimeout(() => runSearch(q), TP.geocode.DEBOUNCE_MS);
   }
 
   // ---- 다이얼로그 ----
@@ -1575,7 +1574,6 @@
               if (seq === side.seq) side.searchFailed = TP.train.loadFailed(); // 역 목록을 못 받았으면 '결과 없음'이 아니라 오류
             } else {
               // 버스: 카카오 키워드 검색에서 고속·시외버스터미널로 분류된 곳만 ('<검색어> 터미널'도 함께 찾아 빠짐을 줄인다).
-              // OSM으로 넘어가지 않는다(터미널 분류가 없어 결과가 늘 비고, 오류가 '결과 없음'으로 가려진다)
               const res = await Promise.all([q, `${q} 터미널`].map((k) => TP.geocode.searchKakaoOnly(k)));
               if (seq === side.seq) side.searchFailed = res.some((r) => r.failed);
               const seen = new Set();
@@ -1590,7 +1588,7 @@
             side.pending = false;
             side.found = found;
             paintHub(s);
-          }, TP.geocode.debounceMs());
+          }, TP.geocode.DEBOUNCE_MS);
         });
         box.addEventListener('change', (e) => {
           if (e.target.name !== `hubPick-${s}`) return;
@@ -1902,9 +1900,9 @@
       const st = G.status();
       box.textContent =
         st.state === 'ready' ? '현재 카카오 지도/검색 사용 중' :
-        st.state === 'failed' ? `카카오 SDK 로드 실패 - 지도를 표시할 수 없고 OSM 검색을 사용 중 (${st.error})` :
+        st.state === 'failed' ? `카카오 SDK 로드 실패 - 지도와 장소 검색을 쓸 수 없음 (${st.error})` :
         st.state === 'loading' ? '카카오 SDK 로드 중…' :
-        '키가 없어 지도를 표시할 수 없고 OSM(Nominatim) 검색을 사용 중';
+        '키가 없어 지도와 장소 검색을 쓸 수 없음';
     };
     show();
     if (G.status().state === 'loading') G.load().then(show);

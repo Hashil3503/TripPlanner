@@ -40,6 +40,20 @@ const B = it('해운대', 35.16, 129.16, { modeIn: 'train', legMin: 5, legCost: 
 const SEOUL = { name: '서울역', lat: 37.5547, lon: 126.9707 };
 const BUSAN = { name: '부산역', lat: 35.1151, lon: 129.0422 };
 
+test('geocode: 카카오를 쓸 수 없으면 다른 서비스로 넘어가지 않고 실패한다 (Nominatim 제거)', async () => {
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = async () => { fetched++; throw new Error('fetch 호출 안 됨'); };
+  try {
+    await assert.rejects(TP.geocode.search('경복궁'), /카카오 검색 실패/);
+    await assert.rejects(TP.geocode.reverse(37.57, 126.97));
+    assert.deepEqual(await TP.geocode.searchKakaoOnly('경복궁'), { list: [], failed: true });
+    assert.equal(fetched, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('hubOf: hub 필드 > 버스 이름 패턴, 기차역은 역 목록이 있어야 이름으로 판별', () => {
   assert.equal(P.hubOf(it('x', 0, 0, { hub: 'train' })), 'train');
   assert.equal(P.hubOf(it('동서울종합터미널', 0, 0)), 'bus');

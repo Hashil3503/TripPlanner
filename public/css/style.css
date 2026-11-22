@@ -439,7 +439,6 @@ body[data-view='main'] .trip-only { display: none !important; }
 .result:hover { background: var(--surface-2); }
 .result-main { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; display: flex; flex-direction: column; gap: 1px; }
 .result-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.result-tag { flex: none; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 999px; background: var(--surface-3); color: var(--muted); }
 .result-name { flex: 0 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-msg { padding: 14px 12px; color: var(--muted); font-size: 13px; }

@@ -1,56 +1,20 @@
-/* geocode.js - 장소 검색 / 역지오코딩.
- * 카카오 SDK(services, js/kakao.js 공유 로더)를 우선 사용하고(키가 있고 로드에 성공했을 때),
- * 결과가 없거나 사용할 수 없으면 Nominatim(OSM)으로 대체한다. Nominatim은 정책상 초당 1회 이하로 호출한다.
+/* geocode.js - 장소 검색 / 역지오코딩. 카카오 SDK(services, js/kakao.js 공유 로더)만 쓴다.
+ * 카카오를 쓸 수 없거나 조회에 실패하면 다른 서비스로 넘어가지 않고 실패로 알린다.
+ * (Nominatim 대체는 입력 중 자동 검색이 사용 정책에 어긋나 제거함, TP-030)
  */
 (function () {
   'use strict';
   const TP = (window.TP = window.TP || {});
 
-  const BASE = 'https://nominatim.openstreetmap.org';
-  const MIN_GAP_MS = 1100;
-  let nextSlot = 0;
   const searchCache = new Map();
-
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  // 모든 Nominatim 요청을 직렬화된 시간 슬롯에 배치 (>= 1.1초 간격)
-  async function throttle(signal) {
-    const t = Math.max(Date.now(), nextSlot);
-    nextSlot = t + MIN_GAP_MS;
-    const wait = t - Date.now();
-    if (wait > 0) await sleep(wait);
-    if (signal && signal.aborted) throw new DOMException('aborted', 'AbortError');
-  }
-
-  async function getJSON(url, signal) {
-    await throttle(signal);
-    const res = await fetch(url, { signal, headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.json();
-  }
-
-  // Nominatim class/type -> 앱 카테고리 추정
-  function guessCategory(cls, type) {
-    const t = String(type || '');
-    const c = String(cls || '');
-    if (/restaurant|fast_food|food_court|bar|pub|biergarten/.test(t)) return 'food';
-    if (/cafe|ice_cream|bakery|coffee/.test(t)) return 'cafe';
-    if (/hotel|hostel|guest_house|motel|apartment|resort/.test(t) || c === 'tourism' && /hotel|hostel|guest_house|motel/.test(t)) return 'stay';
-    if (c === 'shop' || /mall|marketplace|department_store|supermarket/.test(t)) return 'shop';
-    if (c === 'tourism' || c === 'historic' || /museum|attraction|park|viewpoint|theatre|zoo|castle|palace/.test(t) || c === 'leisure') return 'sight';
-    return 'etc';
-  }
 
   // =====================================================================
   // 카카오 JavaScript SDK (services 라이브러리)
   // =====================================================================
   const loadKakao = () => TP.kakao.load(); // 공유 로더 (js/kakao.js)
 
-  /** 입력 디바운스(ms): 카카오는 호출 제한이 느슨해 짧게, Nominatim은 길게 */
-  const debounceMs = () => {
-    const st = TP.kakao.status().state;
-    return st === 'loading' || st === 'ready' ? 300 : 700;
-  };
+  /** 검색 입력 디바운스(ms) */
+  const DEBOUNCE_MS = 300;
 
   // 카카오 카테고리 -> 앱 카테고리
   function kakaoCategory(doc) {
@@ -149,71 +113,30 @@
   }
 
   // =====================================================================
-  // Nominatim (OSM)
-  // =====================================================================
-  async function searchNominatim(q, signal) {
-    const url = `${BASE}/search?format=json&q=${encodeURIComponent(q)}&accept-language=ko&limit=5`;
-    const arr = await getJSON(url, signal);
-    return (Array.isArray(arr) ? arr : [])
-      .map((r) => ({
-        name: r.name || String(r.display_name || '').split(',')[0].trim() || q,
-        displayName: r.display_name || '',
-        lat: parseFloat(r.lat),
-        lon: parseFloat(r.lon),
-        category: guessCategory(r.category || r.class, r.type),
-        source: 'osm',
-      }))
-      .filter((r) => isFinite(r.lat) && isFinite(r.lon));
-  }
-
-  async function reverseNominatim(lat, lon, signal) {
-    const url = `${BASE}/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ko&zoom=18`;
-    const j = await getJSON(url, signal);
-    if (!j || j.error) throw new Error(j && j.error ? j.error : 'no result');
-    const display = j.display_name || '';
-    const parts = display.split(',').map((s) => s.trim()).filter(Boolean);
-    const name = j.name || parts.slice(0, 2).join(' ') || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-    return { name, displayName: display, category: guessCategory(j.category || j.class, j.type), source: 'osm' };
-  }
-
-  // =====================================================================
   // 공개 API
   // =====================================================================
-  /** 장소 검색 -> [{ name, displayName, lat, lon, category, source: 'kakao'|'osm' }]
-   *  카카오(키워드 -> 주소) -> 결과가 없거나 실패하면 Nominatim */
+  /** 장소 검색 -> [{ name, displayName, lat, lon, category, hub, source: 'kakao' }]
+   *  카카오 키워드 -> 주소 검색. 카카오를 쓸 수 없거나 실패하면 throw (빈 배열은 '결과 없음') */
   async function search(query, signal) {
     const q = query.trim();
     const cached = searchCache.get(q);
     if (cached) return cached;
-    let results = [];
-    if (await loadKakao()) {
-      try {
-        results = await searchKakao(q);
-      } catch (e) {
-        console.warn(e);
-        results = [];
-      }
-      if (signal && signal.aborted) throw new DOMException('aborted', 'AbortError');
-    }
-    if (!results.length) results = await searchNominatim(q, signal);
-    searchCache.set(q, results);
-    return results;
+    const { list, failed } = await searchKakaoOnly(q);
+    if (signal && signal.aborted) throw new DOMException('aborted', 'AbortError');
+    if (failed) throw new Error('카카오 검색 실패');
+    searchCache.set(q, list);
+    return list;
   }
 
-  /** 좌표 -> 장소 이름 { name, displayName, category, source } (카카오 -> 실패/결과 없음이면 Nominatim) */
-  async function reverse(lat, lon, signal) {
-    if (await loadKakao()) {
-      try {
-        const r = await reverseKakao(lat, lon);
-        if (r) return r;
-      } catch (e) {
-        console.warn(e);
-      }
-    }
-    return reverseNominatim(lat, lon, signal);
+  /** 좌표 -> 장소 이름 { name, displayName, category, source }. 카카오를 쓸 수 없거나 실패·결과 없음이면 throw */
+  async function reverse(lat, lon) {
+    if (!(await loadKakao())) throw new Error('카카오를 쓸 수 없음');
+    const r = await reverseKakao(lat, lon);
+    if (!r) throw new Error('주소 없음');
+    return r;
   }
 
-  /** 카카오 키워드 검색만 -> { list, failed }. OSM으로 넘어가지 않는다: 오류(failed)와 '결과 없음'(빈 list)을 구분해야 하는 곳(터미널 검색)용 */
+  /** 카카오 검색 -> { list, failed }: 오류(failed)와 '결과 없음'(빈 list)을 구분한다 */
   async function searchKakaoOnly(query) {
     if (!(await loadKakao())) return { list: [], failed: true };
     try {
@@ -253,6 +176,6 @@
     search,
     searchKakaoOnly,
     reverse,
-    debounceMs,
+    DEBOUNCE_MS,
   };
 })();
