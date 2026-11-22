@@ -4,19 +4,6 @@
 로컬 서버(Node.js)가 화면을 제공하고, **회원가입/로그인하면 여행이 계정에 저장**됩니다. 로그인하지 않아도(게스트) 예전처럼 브라우저에 저장하며 그대로 쓸 수 있습니다.
 외부 패키지(npm install)는 필요 없습니다.
 
-<div align="center">
-
-![Node.js](https://img.shields.io/badge/Node.js-24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-Vanilla-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
-![SQLite](https://img.shields.io/badge/SQLite-node%3Asqlite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
-![Kakao Maps](https://img.shields.io/badge/Kakao_Maps-SDK_%2B_REST-FFCD00?style=for-the-badge&logo=kakao&logoColor=black)
-![Caddy](https://img.shields.io/badge/Caddy-HTTPS-1F88C0?style=for-the-badge&logo=caddy&logoColor=white)
-![Oracle Cloud](https://img.shields.io/badge/Oracle_Cloud-Always_Free-F80000?style=for-the-badge)
-![Dependencies](https://img.shields.io/badge/npm_dependencies-0-brightgreen?style=for-the-badge)
-![Tests](https://img.shields.io/badge/Tests-132_pass-success?style=for-the-badge)
-
-</div>
-
 > 🟢 **서비스 중** — [**https://tplanner.duckdns.org**](https://tplanner.duckdns.org) · Oracle Cloud 무료 서버 + Caddy HTTPS
 
 ## 스크린샷
@@ -48,13 +35,24 @@
 
 ## 기술 스택
 
-| 분야 | 기술 |
-| :--- | :--- |
-| **Frontend** | Vanilla JavaScript, HTML, CSS, 카카오맵 JavaScript SDK, SortableJS |
-| **Backend** | Node.js 24 (`node:http`, `node:sqlite`, `node:crypto`), SQLite |
-| **외부 API** | 카카오 대중교통 길찾기 REST API, OSRM, TAGO 열차정보 (공공데이터포털) |
-| **Test** | `node:test` |
-| **Infra** | Oracle Cloud (Ubuntu), Caddy, systemd, cron, DuckDNS |
+<div align="center">
+
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
+![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white)
+![CSS](https://img.shields.io/badge/CSS-1572B6?style=for-the-badge&logo=css&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
+<br />
+![Kakao Maps](https://img.shields.io/badge/Kakao_Maps-FFCD00?style=for-the-badge&logo=kakao&logoColor=black)
+![OSRM](https://img.shields.io/badge/OSRM-7EBC6F?style=for-the-badge&logo=openstreetmap&logoColor=white)
+![Oracle Cloud](https://img.shields.io/badge/Oracle_Cloud-F80000?style=for-the-badge)
+![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)
+![Caddy](https://img.shields.io/badge/Caddy-1F88C0?style=for-the-badge&logo=caddy&logoColor=white)
+<br />
+![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
+![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)
+
+</div>
 
 ## 실행 방법
 
@@ -269,11 +267,3 @@ public/
 ```
 
 모든 스크립트는 전역 `window.TP` 네임스페이스를 공유하며 `index.html`의 순서대로 로드됩니다.
-
-## 알려진 한계
-
-- 대중교통은 카카오 REST 키가 없거나 조회에 실패하면 추정치입니다. 실제 경로 조회도 출발 시각(실시간 배차)은 반영하지 않으며, 환승 할인·지역별 요금 차이는 카카오가 준 요금을 그대로 씁니다.
-- OSRM 공개 서버는 공정 사용 정책이 있고 응답이 느리거나 실패할 수 있습니다(이 경우 추정값으로 대체).
-- 실시간 교통 상황과 택시 시간요금은 반영하지 않습니다. 자가용·택시 통행료는 경로 중 고속도로 거리로 추정해 민자고속도로·개방식 요금은 실제와 다를 수 있습니다.
-- 비밀번호 찾기(이메일 등)는 없습니다. 비밀번호를 잊으면 서버 PC에서 `npm run reset-password -- <아이디>`로 재설정해야 합니다(계정 기능 참고).
-- 같은 계정을 여러 탭/기기에서 동시에 편집하면 충돌을 감지해 서버 버전을 불러올지 내 변경으로 덮어쓸지 묻습니다(자동 병합은 없음). 설정(요금 기준·인원)은 여전히 마지막 저장이 우선합니다.
