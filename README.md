@@ -4,6 +4,67 @@
 로컬 서버(Node.js)가 화면을 제공하고, **회원가입/로그인하면 여행이 계정에 저장**됩니다. 로그인하지 않아도(게스트) 예전처럼 브라우저에 저장하며 그대로 쓸 수 있습니다.
 외부 패키지(npm install)는 필요 없습니다.
 
+<div align="center">
+
+![Node.js](https://img.shields.io/badge/Node.js-24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-Vanilla-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
+![SQLite](https://img.shields.io/badge/SQLite-node%3Asqlite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
+![Kakao Maps](https://img.shields.io/badge/Kakao_Maps-SDK_%2B_REST-FFCD00?style=for-the-badge&logo=kakao&logoColor=black)
+![Caddy](https://img.shields.io/badge/Caddy-HTTPS-1F88C0?style=for-the-badge&logo=caddy&logoColor=white)
+![Oracle Cloud](https://img.shields.io/badge/Oracle_Cloud-Always_Free-F80000?style=for-the-badge)
+![Dependencies](https://img.shields.io/badge/npm_dependencies-0-brightgreen?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-132_pass-success?style=for-the-badge)
+
+</div>
+
+> 🟢 **서비스 중** — [**https://tplanner.duckdns.org**](https://tplanner.duckdns.org) · Oracle Cloud 무료 서버 + Caddy HTTPS
+
+## 스크린샷
+
+**PC** — 왼쪽 일정(구간별 이동수단·시간·요금), 가운데 지도(일정 번호 마커·경로선), 오른쪽 일차/전체 요약과 비용 구성
+
+<p align="center">
+  <img src="screenshots/pc.png" width="900" alt="PC 화면: 서울역에서 부산역까지 열차, 부산역에서 해운대까지 대중교통 구간과 여행 요약" />
+</p>
+
+**모바일** — 전체 화면 지도 위에 `일정`/`요약` 탭이 있는 하단 시트를 띄우고, 끌어서 높이를 조절합니다
+
+<table align="center">
+  <tr>
+    <th align="center">내 여행</th>
+    <th align="center">지도 (시트 접힘)</th>
+    <th align="center">일정 탭</th>
+    <th align="center">요약 탭</th>
+    <th align="center">비용 구성</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/mobile-home.jpg" width="170" alt="모바일 내 여행 카드 목록" /></td>
+    <td align="center"><img src="screenshots/mobile-map.jpg" width="170" alt="모바일 지도와 접힌 하단 시트" /></td>
+    <td align="center"><img src="screenshots/mobile-schedule.jpg" width="170" alt="모바일 일정 탭" /></td>
+    <td align="center"><img src="screenshots/mobile-summary.jpg" width="170" alt="모바일 요약 탭" /></td>
+    <td align="center"><img src="screenshots/mobile-cost.jpg" width="170" alt="모바일 여행 전체 합계와 비용 구성" /></td>
+  </tr>
+</table>
+
+## 기술 스택
+
+| 분야 | 기술 | 설명 |
+| :--- | :--- | :--- |
+| **Frontend** | Vanilla JavaScript · HTML · CSS | 빌드 도구·프레임워크 없이 전역 `window.TP` 네임스페이스로 모듈을 나누고 `<script>` 순서대로 로드. CSS 변수 기반 라이트/다크 테마, 반응형(데스크톱 3열 · 태블릿 오버레이 · 모바일 하단 시트) |
+| | 카카오맵 JavaScript SDK | 지도·마커·경로선, `services` 라이브러리로 장소 검색과 좌표→주소 |
+| | SortableJS 1.15 (CDN) | 일정 드래그 정렬 |
+| **Backend** | Node.js 24 (`node:http`) | npm 의존성 0개. 정적 파일 제공 + REST API |
+| | SQLite (`node:sqlite`) | 계정·세션·여행(낙관적 잠금 `rev`)·외부 API 응답 캐시 |
+| | `node:crypto` | 비밀번호 scrypt 해시, 세션 토큰(DB에는 SHA-256만 저장) |
+| | `node:test` | 단위·API 테스트 132개 (`npm test`) |
+| **외부 API** | 카카오 대중교통 길찾기 REST API | 대중교통 실경로·소요 시간·요금. 서버가 키를 숨기고 대신 호출·캐시 |
+| | OSRM (FOSSGIS 공개 서버) | 도보·자전거·자동차 경로와 고속도로 구간(통행료 추정) |
+| | TAGO 열차정보 (공공데이터포털) | 열차 역 목록·시간표·일반 성인 요금. 서버 프록시 |
+| **Infra** | Oracle Cloud Always Free VM (Ubuntu) | 상시 운영 서버 |
+| | Caddy | 리버스 프록시, Let's Encrypt 자동 HTTPS |
+| | systemd · cron | 서비스 관리, 매일 DB 스냅샷 백업(`VACUUM INTO`, 14일 보관) |
+| | DuckDNS | 무료 도메인 `tplanner.duckdns.org` |
+
 ## 실행 방법
 
 1. [Node.js](https://nodejs.org) **22.13 이상**(권장 24)을 설치합니다. (내장 `node:sqlite`를 사용합니다.)
